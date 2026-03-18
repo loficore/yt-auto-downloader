@@ -1,17 +1,18 @@
-import { execa } from 'execa';
-import path from 'path';
+import { execa } from "execa";
+import path from "path";
+import { config } from "../config";
 
 const COOKIE_ERROR_KEYWORDS = [
-  'cookies-from-browser',
-  'could not find',
-  'cookie',
+  "cookies-from-browser",
+  "could not find",
+  "cookie",
 ];
 
 /**
  * 下载任务接口
  */
 export interface DownloadTask {
-    /** youtube链接 */
+  /** youtube链接 */
   url: string;
   /** 艺术家名称（可选） */
   artist?: string;
@@ -36,7 +37,9 @@ export interface DownloadCallbacks {
  */
 export class YoutubeManager {
   private downloadDir: string;
-  private proxy = Bun.env.PROXY || Bun.env.YTDLP_PROXY || 'socks5://127.0.0.1:7890';
+  private proxy: string | undefined;
+  private cookieBrowser: string | undefined;
+  private cookieFile: string | undefined;
   private callbacks: DownloadCallbacks = {};
   private progressRegex = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 
@@ -47,6 +50,14 @@ export class YoutubeManager {
    */
   constructor(dir: string, callbacks?: DownloadCallbacks) {
     this.downloadDir = path.resolve(dir);
+    this.proxy = config.proxy || config.ytDlpProxy;
+    this.cookieBrowser = config.ytDlpCookiesFromBrowser;
+    this.cookieFile = config.ytDlpCookiesFile;
+    if (this.proxy) {
+      console.log(`[🔌] 使用代理: ${this.proxy}`);
+    } else {
+      console.log(`[🔌] 未配置代理，将直连下载`);
+    }
     this.callbacks = callbacks || {};
   }
 
@@ -62,12 +73,11 @@ export class YoutubeManager {
    * 确保历史文件存在
    */
   private async ensureHistoryFile(): Promise<void> {
-    const historyPath = path.join(this.downloadDir, 'history.txt');
+    const historyPath = path.join(this.downloadDir, "history.txt");
     try {
       await Bun.file(historyPath).exists();
     } catch {
-      // 文件不存在则自动创建
-      await Bun.write(historyPath, '');
+      await Bun.write(historyPath, "");
     }
   }
 
@@ -86,33 +96,24 @@ export class YoutubeManager {
 
   /**
    * 获取可用的 cookies 参数
-   * @returns {Promise<string[]>} yt-dlp cookies 参数
+   * @returns {string[]} yt-dlp cookies 参数
    */
-  private async getCookieArgs(): Promise<string[]> {
-    const userDefined = Bun.env.YTDLP_COOKIES_FROM_BROWSER;
-    if (userDefined && userDefined.trim()) {
-      return ['--cookies-from-browser', userDefined.trim()];
+  private getCookieArgs(): string[] {
+    // 优先使用 cookies 文件
+    if (this.cookieFile && this.cookieFile.trim()) {
+      const cookiePath = path.resolve(this.cookieFile.trim());
+      console.log(`[🍪] 使用 Cookie 文件: ${cookiePath}`);
+      return ["--cookies", cookiePath];
     }
 
-    const home = Bun.env.HOME;
-    if (!home) {
-      return [];
+    // 其次使用浏览器 cookies
+    if (this.cookieBrowser && this.cookieBrowser.trim()) {
+      const browser = this.cookieBrowser.trim().toLowerCase();
+      console.log(`[🍪] 使用浏览器 Cookie: ${browser}`);
+      return ["--cookies-from-browser", browser];
     }
 
-    const browserCandidates: { browser: string; hintPath: string }[] = [
-      { browser: 'chrome', hintPath: path.join(home, '.config/google-chrome') },
-      { browser: 'chromium', hintPath: path.join(home, '.config/chromium') },
-      { browser: 'brave', hintPath: path.join(home, '.config/BraveSoftware/Brave-Browser') },
-      { browser: 'edge', hintPath: path.join(home, '.config/microsoft-edge') },
-      { browser: 'firefox', hintPath: path.join(home, '.mozilla/firefox') },
-    ];
-
-    for (const candidate of browserCandidates) {
-      if (await this.pathExists(candidate.hintPath)) {
-        return ['--cookies-from-browser', candidate.browser];
-      }
-    }
-
+    console.log(`[🍪] 未配置 Cookie，直连下载`);
     return [];
   }
 
@@ -123,7 +124,9 @@ export class YoutubeManager {
    */
   private isCookieError(errorText: string): boolean {
     const normalized = errorText.toLowerCase();
-    return COOKIE_ERROR_KEYWORDS.some((keyword) => normalized.includes(keyword));
+    return COOKIE_ERROR_KEYWORDS.some((keyword) =>
+      normalized.includes(keyword),
+    );
   }
 
   /**
@@ -156,16 +159,22 @@ export class YoutubeManager {
    * @returns {string} 可读错误信息
    */
   private getErrorMessage(error: unknown): string {
-    if (typeof error === 'string') {
+    if (typeof error === "string") {
       return error;
     }
 
     if (error instanceof Error) {
-      const execaError = error as Error & { stderr?: unknown; shortMessage?: unknown };
-      if (typeof execaError.stderr === 'string' && execaError.stderr.trim()) {
+      const execaError = error as Error & {
+        stderr?: unknown;
+        shortMessage?: unknown;
+      };
+      if (typeof execaError.stderr === "string" && execaError.stderr.trim()) {
         return execaError.stderr;
       }
-      if (typeof execaError.shortMessage === 'string' && execaError.shortMessage.trim()) {
+      if (
+        typeof execaError.shortMessage === "string" &&
+        execaError.shortMessage.trim()
+      ) {
         return execaError.shortMessage;
       }
       return execaError.message;
@@ -174,7 +183,7 @@ export class YoutubeManager {
     try {
       return JSON.stringify(error);
     } catch {
-      return 'Unknown error';
+      return "Unknown error";
     }
   }
 
@@ -184,7 +193,7 @@ export class YoutubeManager {
    * @param {string[]} args - 命令参数
    */
   private async runYtDlp(taskId: string, args: string[]): Promise<void> {
-    const subprocess = execa('yt-dlp', ['--newline', ...args]);
+    const subprocess = execa("yt-dlp", ["--newline", ...args]);
 
     const onChunk = (chunk: string | Buffer): void => {
       const text = chunk.toString();
@@ -197,8 +206,8 @@ export class YoutubeManager {
       }
     };
 
-    subprocess.stdout?.on('data', onChunk);
-    subprocess.stderr?.on('data', onChunk);
+    subprocess.stdout?.on("data", onChunk);
+    subprocess.stderr?.on("data", onChunk);
 
     await subprocess;
   }
@@ -210,34 +219,38 @@ export class YoutubeManager {
    */
   async downloadAudio(taskId: string, task: DownloadTask): Promise<void> {
     console.log(`[🚀] 正在处理: ${task.url} (ID: ${taskId})`);
-    
+
     this.callbacks.onStart?.(taskId);
 
     try {
       await this.ensureHistoryFile();
 
-      const cookieArgs = await this.getCookieArgs();
-      const baseArgs = [
-        '--proxy', this.proxy,
-        '-f', 'ba',
-        '-x', '--audio-format', 'mp3',
-        '--audio-quality', '0',
-        '--add-metadata',
-        '--embed-thumbnail',
-        '--download-archive', path.join(this.downloadDir, 'history.txt'),
-        '-o', `${this.downloadDir}/%(artist)s - %(title)s.%(ext)s`,
-        task.url,
-      ];
+      const cookieArgs = this.getCookieArgs();
+      const baseArgs: string[] = [];
+      
+      if (this.proxy) {
+        baseArgs.push("--proxy", this.proxy);
+      }
+      
+      baseArgs.push(
+        "-f", "ba",
+        "-x", "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "--add-metadata",
+        "--embed-thumbnail",
+        "--download-archive",
+        path.join(this.downloadDir, "history.txt"),
+        "-o",
+        `${this.downloadDir}/%(artist)s - %(title)s.%(ext)s`,
+        task.url
+      );
 
       try {
-        await this.runYtDlp(taskId, [
-          ...cookieArgs,
-          ...baseArgs,
-        ]);
+        await this.runYtDlp(taskId, [...cookieArgs, ...baseArgs]);
       } catch (error) {
         const errorMsg = this.getErrorMessage(error);
         if (cookieArgs.length > 0 && this.isCookieError(errorMsg)) {
-          console.warn('[⚠️] cookies 读取失败，自动重试（不带 cookies）');
+          console.warn("[⚠️] cookies 读取失败，自动重试（不带 cookies）");
           await this.runYtDlp(taskId, baseArgs);
         } else {
           throw error;
@@ -246,7 +259,6 @@ export class YoutubeManager {
 
       console.log(`[✅] 成功: ${task.url}`);
       this.callbacks.onSuccess?.(taskId);
-      
     } catch (error: unknown) {
       const errorMsg = this.getErrorMessage(error);
       console.error(`[❌] 失败: ${task.url}`, errorMsg);
@@ -259,7 +271,6 @@ export class YoutubeManager {
    * @param {string} taskId - 任务 ID
    */
   cancelDownload(taskId: string): void {
-    // TODO: 实现后台进程取消逻辑
     console.log(`[⏹️] 取消下载: ${taskId}`);
   }
 }

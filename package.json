@@ -1,36 +1,23 @@
 {
   "name": "yt-auto-downloader",
-  "type": "module",
+  "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "bun run --watch src/backend/server.ts",
-    "dev:frontend": "vite --host",
-    "build:frontend": "vite build",
-    "start": "bun run src/backend/server.ts",
-    "lint": "eslint . --ext .ts,.tsx",
-    "build:check": "tsc --noEmit",
+    "dev": "bun run --filter @yt-auto-downloader/backend dev",
+    "dev:frontend": "BACKEND_PORT=$(grep '^PORT=' .env | cut -d= -f2 || echo 3000) bun run --filter @yt-auto-downloader/frontend dev",
+    "dev:all": "bun run dev & bun run dev:frontend",
+    "build:frontend": "bun run --filter @yt-auto-downloader/frontend build",
+    "start": "bun run --filter @yt-auto-downloader/backend start",
+    "lint": "bun run --filter @yt-auto-downloader/backend lint && bun run --filter @yt-auto-downloader/frontend lint",
+    "build:check": "bun run --filter @yt-auto-downloader/backend build:check",
     "test": "bun test"
   },
-  "dependencies": {
-    "@elysiajs/cors": "^1.4.1",
-    "@sinclair/typebox": "^0.34.48",
-    "elysia": "^1.4.27",
-    "execa": "^6.1.0",
-    "prettier": "^3.8.1",
-    "prettier-plugin-embed": "^0.5.1",
-    "prettier-plugin-sql": "^0.19.2",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
   "devDependencies": {
-    "@eslint/js": "latest",
     "@types/bun": "latest",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "@vitejs/plugin-react": "^4.2.0",
-    "eslint-plugin-jsdoc": "^62.8.0",
-    "typescript": "^5.3.0",
-    "typescript-eslint": "latest",
-    "vite": "^5.0.0"
+    "typescript": "^5.3.0"
   }
 }

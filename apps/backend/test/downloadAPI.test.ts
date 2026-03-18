@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { Elysia } from 'elysia';
-import { createDownloadAPI } from '../src/backend/api/download';
-import type { DownloadStatus } from '../src/types/shared';
+import { createDownloadAPI } from '../src/api/download';
+import type { DownloadStatus } from '@yt-auto-downloader/shared';
 
 interface AppLike {
   handle(request: Request): Response | Promise<Response>;

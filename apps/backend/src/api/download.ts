@@ -1,6 +1,6 @@
-import { Elysia, t } from 'elysia';
-import type { DownloadQueue } from '../services/DownloadQueue';
-import type { DownloadTask } from '../../types/shared';
+import { Elysia, t } from "elysia";
+import type { DownloadQueue } from "../services/DownloadQueue";
+import type { DownloadTask } from "@yt-auto-downloader/shared";
 
 /**
  * 将内部 QueueTask 转换为 API 返回的 DownloadTask
@@ -12,16 +12,16 @@ function transformQueueTaskToDownloadTask(queueTask: unknown): DownloadTask {
   const id = task.id as string;
   const url = task.url as string;
   const artist = task.artist as string | undefined;
-  const status = task.status as DownloadTask['status'];
+  const status = task.status as DownloadTask["status"];
   const error = task.error as string | undefined;
-  
+
   return {
-    id: id ?? '',
-    url: url ?? '',
-    title: artist ?? url ?? '未知标题',
-    artist: artist ?? '',
-    album: '',
-    status: status ?? 'pending',
+    id: id ?? "",
+    url: url ?? "",
+    title: artist ?? url ?? "未知标题",
+    artist: artist ?? "",
+    album: "",
+    status: status ?? "pending",
     progress: Number(task.progress ?? 0),
     createdAt: Number(task.createdAt ?? Date.now()),
     updatedAt: Number(task.updatedAt ?? Date.now()),
@@ -35,9 +35,9 @@ function transformQueueTaskToDownloadTask(queueTask: unknown): DownloadTask {
  * @returns {Elysia} Elysia 路由
  */
 export function createDownloadAPI(queue: DownloadQueue) {
-  return new Elysia({ prefix: '/api/download' })
+  return new Elysia({ prefix: "/api/download" })
     .post(
-      '/add',
+      "/add",
       ({ body }) => {
         const taskId = queue.addTask(body.url, body.artist);
         const queueTask = queue.getTask(taskId);
@@ -45,7 +45,9 @@ export function createDownloadAPI(queue: DownloadQueue) {
           success: true,
           data: {
             taskId,
-            task: queueTask ? transformQueueTaskToDownloadTask(queueTask) : null,
+            task: queueTask
+              ? transformQueueTaskToDownloadTask(queueTask)
+              : null,
           },
         };
       },
@@ -54,10 +56,10 @@ export function createDownloadAPI(queue: DownloadQueue) {
           url: t.String({ minLength: 1 }),
           artist: t.Optional(t.String()),
         }),
-      }
+      },
     )
     .post(
-      '/bulk',
+      "/bulk",
       ({ body }) => {
         const taskIds = queue.addBulkTasks(body.urls);
         return {
@@ -72,52 +74,43 @@ export function createDownloadAPI(queue: DownloadQueue) {
         body: t.Object({
           urls: t.Array(t.String({ minLength: 1 })),
         }),
-      }
+      },
     )
-    .get('/queue', () => {
+    .get("/queue", () => {
       const tasks = queue.getAllTasks();
       return {
         success: true,
         data: tasks.map(transformQueueTaskToDownloadTask),
       };
     })
-    .get('/queue-info', () => ({
+    .get("/queue-info", () => ({
       success: true,
       data: queue.getQueueInfo(),
     }))
-    .delete(
-      '/task/:id',
-      ({ params }) => {
-        const removed = queue.removeTask(params.id);
-        return {
-          success: removed,
-          data: { removed },
-        };
-      }
-    )
-    .post(
-      '/task/:id/pause',
-      ({ params }) => {
-        queue.pauseTask(params.id);
-        const task = queue.getTask(params.id);
-        return {
-          success: true,
-          data: task ? transformQueueTaskToDownloadTask(task) : null,
-        };
-      }
-    )
-    .post(
-      '/task/:id/resume',
-      ({ params }) => {
-        queue.resumeTask(params.id);
-        const task = queue.getTask(params.id);
-        return {
-          success: true,
-          data: task ? transformQueueTaskToDownloadTask(task) : null,
-        };
-      }
-    )
-    .post('/clear-completed', () => {
+    .delete("/task/:id", ({ params }) => {
+      const removed = queue.removeTask(params.id);
+      return {
+        success: removed,
+        data: { removed },
+      };
+    })
+    .post("/task/:id/pause", ({ params }) => {
+      queue.pauseTask(params.id);
+      const task = queue.getTask(params.id);
+      return {
+        success: true,
+        data: task ? transformQueueTaskToDownloadTask(task) : null,
+      };
+    })
+    .post("/task/:id/resume", ({ params }) => {
+      queue.resumeTask(params.id);
+      const task = queue.getTask(params.id);
+      return {
+        success: true,
+        data: task ? transformQueueTaskToDownloadTask(task) : null,
+      };
+    })
+    .post("/clear-completed", () => {
       queue.clearCompleted();
       return {
         success: true,

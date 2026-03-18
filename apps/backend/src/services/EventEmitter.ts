@@ -1,4 +1,4 @@
-import type { WebSocketMessage } from '../../types/shared';
+import type { WebSocketMessage } from "@yt-auto-downloader/shared";
 
 /**
  * WebSocket 事件广播器
@@ -37,14 +37,14 @@ export class EventEmitter {
    */
   broadcast(message: WebSocketMessage): void {
     const payload = JSON.stringify(message);
-    
+
     for (const conn of this.connections) {
       try {
         if (conn.readyState === 1 /* OPEN */) {
           conn.send(payload);
         }
       } catch (error) {
-        console.error('Failed to send WebSocket message:', error);
+        console.error("Failed to send WebSocket message:", error);
         this.connections.delete(conn);
       }
     }

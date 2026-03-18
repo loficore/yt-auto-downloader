@@ -1,20 +1,9 @@
-import React from 'react';
-import type { QueueInfo } from '../../types/shared';
-import type { JSX } from 'react';
+import type { QueueInfo } from "@yt-auto-downloader/shared";
 
-/**
- * 队列统计组件属性接口
- */
 interface QueueStatsProps {
-  /** 队列统计信息 */
   stats: QueueInfo;
 }
 
-/**
- * 队列统计组件
- * @param {QueueStatsProps} props - 组件属性
- * @returns {JSX.Element} 组件 JSX 元素
- */
 export function QueueStats({ stats }: QueueStatsProps) {
   return (
     <div className="queue-stats">
@@ -25,25 +14,25 @@ export function QueueStats({ stats }: QueueStatsProps) {
           <div className="stat-label">总计</div>
         </div>
         <div className="stat-item">
-          <div className="stat-value" style={{ color: '#f59e0b' }}>
+          <div className="stat-value" style={{ color: "#f59e0b" }}>
             {stats.pending}
           </div>
           <div className="stat-label">等待中</div>
         </div>
         <div className="stat-item">
-          <div className="stat-value" style={{ color: '#3b82f6' }}>
+          <div className="stat-value" style={{ color: "#3b82f6" }}>
             {stats.downloading}
           </div>
           <div className="stat-label">下载中</div>
         </div>
         <div className="stat-item">
-          <div className="stat-value" style={{ color: '#10b981' }}>
+          <div className="stat-value" style={{ color: "#10b981" }}>
             {stats.completed}
           </div>
-          <div className="stat-label">已完成</div>
+          <div className="stat-label">中断</div>
         </div>
         <div className="stat-item">
-          <div className="stat-value" style={{ color: '#ef4444' }}>
+          <div className="stat-value" style={{ color: "#ef4444" }}>
             {stats.failed}
           </div>
           <div className="stat-label">失败</div>

@@ -21,7 +21,7 @@ export interface DownloadTask {
   /** 任务状态 */
   status: DownloadStatus;
   /** 下载进度，0-100 */
-  progress: number; // 0-100
+  progress: number;
   /** 任务创建时间戳 */
   createdAt: number;
   /** 任务更新时间戳 */
