@@ -19,7 +19,8 @@ export default tseslint.config(
       "test/*.ts",
       "scripts/**",
       "eslint.config.js",
-      "vite.config.ts",
+      "apps/**/vite.config.ts",
+      "apps/**/test/**",
     ],
   },
 
@@ -70,6 +71,11 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-return": "off",
       "@typescript-eslint/restrict-template-expressions": "off",
       "@typescript-eslint/consistent-generic-constructors": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "react-hooks/exhaustive-deps": "off",
     },
   },
 

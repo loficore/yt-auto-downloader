@@ -16,7 +16,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@yt-auto-downloader/shared": ["../../packages/shared/types"]
+      "@yt-auto-downloader/shared": ["../../packages/shared/index.ts"]
     }
   },
   "include": ["src"],
