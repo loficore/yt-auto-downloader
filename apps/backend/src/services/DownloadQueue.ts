@@ -1,6 +1,9 @@
 import { YoutubeManager } from "./YoutubeManager";
+import { PlaylistService } from "./PlaylistService";
 import { DatabaseService, type TaskRecord } from "./Database";
 import type { DownloadStatus, QueueInfo } from "@yt-auto-downloader/shared";
+import { config } from "../config";
+import { logger } from "@yt-auto-downloader/shared";
 
 /**
  * 队列中的下载任务
@@ -32,6 +35,7 @@ export class DownloadQueue {
   private downloading: Set<string> = new Set();
   private maxConcurrent: number;
   private youtubeManager: YoutubeManager;
+  private playlistService: PlaylistService;
   private db: DatabaseService;
   private callbacks: {
     /**  任务更新回调 */
@@ -51,6 +55,7 @@ export class DownloadQueue {
   constructor(downloadDir: string, maxConcurrent = 1, db?: DatabaseService) {
     this.maxConcurrent = maxConcurrent;
     this.db = db || new DatabaseService();
+    this.playlistService = new PlaylistService();
     this.youtubeManager = new YoutubeManager(downloadDir, {
       /**
        * 下载开始回调
@@ -71,7 +76,7 @@ export class DownloadQueue {
        * @param {string} taskId - 任务 ID
        * @returns {void}
        */
-      onSuccess: (taskId) => this.updateTaskStatus(taskId, "completed"),
+      onSuccess: (taskId) => this.handleDownloadSuccess(taskId),
       /**
        * 下载失败回调
        * @param {string} taskId - 任务 ID
@@ -81,6 +86,92 @@ export class DownloadQueue {
       onError: (taskId, error) =>
         this.updateTaskStatus(taskId, "failed", error),
     });
+  }
+
+  /**
+   * 处理下载成功
+   * @param {string} taskId - 任务 ID
+   */
+  private handleDownloadSuccess(taskId: string): void {
+    const task = this.queue.get(taskId);
+    if (task) {
+      // 标记视频为已下载
+      const url = task.url;
+      const videoIdMatch = url.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+      if (videoIdMatch && videoIdMatch[1]) {
+        const videoId = videoIdMatch[1];
+        // 尝试从 URL 中获取 playlist_id（如果有）
+        const playlistIdMatch = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+        if (playlistIdMatch && playlistIdMatch[1]) {
+          this.db.markVideoDownloaded(videoId, playlistIdMatch[1]);
+        }
+      }
+    }
+    this.updateTaskStatus(taskId, "completed");
+  }
+
+  /**
+   * 同步播放列表
+   * @param {string} playlistUrl - 播放列表URL
+   * @returns {{ added: number; total: number; downloaded: number }} 添加的任务数统计
+   */
+  async syncPlaylist(playlistUrl: string): Promise<{
+    added: number;
+    total: number;
+    downloaded: number;
+  }> {
+    logger.info("syncPlaylist called", { playlistUrl });
+    
+    const playlist = await this.playlistService.getPlaylist(playlistUrl);
+    if (!playlist) {
+      logger.warn("Failed to get playlist info", { playlistUrl });
+      return { added: 0, total: 0, downloaded: 0 };
+    }
+
+    // 保存视频信息到数据库
+    const videoRecords = this.playlistService.toVideoRecords(
+      playlist.id,
+      playlist.videos,
+    );
+    this.db.saveVideos(videoRecords);
+
+    // 获取未下载的视频（限制数量）
+    const maxDownloads = config.maxDownloadsPerSync || 10;
+    const undownloadedVideos = this.db.getUndownloadedVideos(
+      playlist.id,
+      maxDownloads,
+    );
+
+    // 创建下载任务
+    let added = 0;
+    for (const video of undownloadedVideos) {
+      const url = `https://www.youtube.com/watch?v=${video.id}`;
+      this.addTask(url, video.artist || undefined);
+      added++;
+    }
+
+    const stats = this.db.getPlaylistStats(playlist.id);
+
+    logger.info("Playlist sync completed", {
+      added,
+      total: stats.total,
+      downloaded: stats.downloaded,
+    });
+
+    return {
+      added,
+      total: stats.total,
+      downloaded: stats.downloaded,
+    };
+  }
+
+  /**
+   * 获取播放列表统计信息
+   * @param {string} playlistId - 播放列表ID
+   * @returns {{ total: number; downloaded: number }} 统计信息
+   */
+  getPlaylistStats(playlistId: string): { total: number; downloaded: number } {
+    return this.db.getPlaylistStats(playlistId);
   }
 
   /**
@@ -110,7 +201,7 @@ export class DownloadQueue {
 
     // 自动重试 pending 任务
     this.processQueue();
-    console.log(`[💾] 从数据库加载了 ${records.length} 个任务`);
+    logger.info("Tasks loaded from database", { count: records.length });
   }
 
   /**
@@ -144,9 +235,9 @@ export class DownloadQueue {
 
   /**
    * 添加单个下载任务
-   * @param url - YouTube URL
-   * @param artist - 艺术家名称（可选）
-   * @returns 任务 ID
+   * @param {string} url - YouTube URL
+   * @param {string} [artist] - 艺术家名称（可选）
+   * @returns {string} 任务 ID
    */
   addTask(url: string, artist?: string): string {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
@@ -354,6 +445,6 @@ export class DownloadQueue {
       this.saveTask(task);
     }
     this.db.close();
-    console.log("[💾] 队列已关闭，状态已保存");
+    logger.info("Queue shutdown, state saved");
   }
 }

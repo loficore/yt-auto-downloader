@@ -116,5 +116,27 @@ export function createDownloadAPI(queue: DownloadQueue) {
         success: true,
         data: queue.getQueueInfo(),
       };
+    })
+    .post(
+      "/sync-playlist",
+      async ({ body }) => {
+        const result = await queue.syncPlaylist(body.url);
+        return {
+          success: true,
+          data: result,
+        };
+      },
+      {
+        body: t.Object({
+          url: t.String({ minLength: 1 }),
+        }),
+      },
+    )
+    .get("/playlist-stats/:playlistId", ({ params }) => {
+      const stats = queue.getPlaylistStats(params.playlistId);
+      return {
+        success: true,
+        data: stats,
+      };
     });
 }

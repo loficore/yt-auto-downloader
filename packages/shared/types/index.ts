@@ -115,3 +115,13 @@ export interface ApiResponse<T> {
   /** 错误信息 */
   error?: string;
 }
+
+/** 播放列表同步结果 */
+export interface PlaylistSyncResult {
+  /** 新添加的任务数 */
+  added: number;
+  /** 播放列表总视频数 */
+  total: number;
+  /** 已下载的视频数 */
+  downloaded: number;
+}

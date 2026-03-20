@@ -1,6 +1,10 @@
 import { execa } from "execa";
-import path from "path";
+import path, { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { config } from "../config";
+import { logger } from "@yt-auto-downloader/shared";
+
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
 const COOKIE_ERROR_KEYWORDS = [
   "cookies-from-browser",
@@ -40,8 +44,10 @@ export class YoutubeManager {
   private proxy: string | undefined;
   private cookieBrowser: string | undefined;
   private cookieFile: string | undefined;
+  private ytDlpJsRuntimes: string | undefined;
   private callbacks: DownloadCallbacks = {};
   private progressRegex = /\[download\]\s+(\d+(?:\.\d+)?)%/;
+  private itemRegex = /\[download\]\s+Downloading item (\d+) of (\d+)/;
 
   /**
    * 初始化 YoutubeManager
@@ -53,12 +59,52 @@ export class YoutubeManager {
     this.proxy = config.proxy || config.ytDlpProxy;
     this.cookieBrowser = config.ytDlpCookiesFromBrowser;
     this.cookieFile = config.ytDlpCookiesFile;
+    this.ytDlpJsRuntimes = config.ytDlpJsRuntimes;
     if (this.proxy) {
-      console.log(`[🔌] 使用代理: ${this.proxy}`);
+      logger.info("Using proxy", { proxy: this.proxy });
     } else {
-      console.log(`[🔌] 未配置代理，将直连下载`);
+      logger.info("No proxy configured, direct download");
     }
+    if (this.cookieFile) {
+      logger.info("Cookie file configured", { cookieFile: this.cookieFile });
+    } else if (this.cookieBrowser) {
+      logger.info("Cookie browser configured", { cookieBrowser: this.cookieBrowser });
+    } else {
+      logger.info("No cookie configured");
+    }
+    logger.info("yt-dlp JavaScript runtimes configured", {
+      runtimes: this.getResolvedJsRuntime(),
+    });
     this.callbacks = callbacks || {};
+  }
+
+  /**
+   * 获取 yt-dlp JS runtime 参数值
+   * @returns {string | undefined} 运行时参数
+   */
+  private getResolvedJsRuntime(): string | undefined {
+    if (this.ytDlpJsRuntimes && this.ytDlpJsRuntimes.trim()) {
+      return this.ytDlpJsRuntimes.trim();
+    }
+
+    const bunPath = Bun.which("bun");
+    if (bunPath) {
+      return `bun:${bunPath}`;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * 获取 yt-dlp JS runtime 参数
+   * @returns {string[]} yt-dlp JS runtime 参数
+   */
+  private getJsRuntimeArgs(): string[] {
+    const runtime = this.getResolvedJsRuntime();
+    if (!runtime) {
+      return [];
+    }
+    return ["--js-runtimes", runtime];
   }
 
   /**
@@ -101,19 +147,21 @@ export class YoutubeManager {
   private getCookieArgs(): string[] {
     // 优先使用 cookies 文件
     if (this.cookieFile && this.cookieFile.trim()) {
-      const cookiePath = path.resolve(this.cookieFile.trim());
-      console.log(`[🍪] 使用 Cookie 文件: ${cookiePath}`);
+      const cookiePath = path.isAbsolute(this.cookieFile.trim())
+        ? this.cookieFile.trim()
+        : path.resolve(rootDir, this.cookieFile.trim());
+      logger.info("Using cookie file", { path: cookiePath });
       return ["--cookies", cookiePath];
     }
 
     // 其次使用浏览器 cookies
     if (this.cookieBrowser && this.cookieBrowser.trim()) {
       const browser = this.cookieBrowser.trim().toLowerCase();
-      console.log(`[🍪] 使用浏览器 Cookie: ${browser}`);
+      logger.info("Using browser cookie", { browser });
       return ["--cookies-from-browser", browser];
     }
 
-    console.log(`[🍪] 未配置 Cookie，直连下载`);
+    logger.info("No cookie configured, direct download");
     return [];
   }
 
@@ -135,22 +183,26 @@ export class YoutubeManager {
    * @returns {number | null} 进度百分比
    */
   private extractProgress(line: string): number | null {
+    // 匹配: [download] 50.5%
     const match = this.progressRegex.exec(line);
-    if (!match) {
-      return null;
+    if (match && match[1]) {
+      const progress = Number.parseFloat(match[1]);
+      if (!Number.isNaN(progress)) {
+        return Math.max(0, Math.min(100, Math.floor(progress)));
+      }
     }
 
-    const matchedProgress = match[1];
-    if (!matchedProgress) {
-      return null;
+    // 匹配播放列表项: [download] Downloading item 1 of 10
+    const itemMatch = this.itemRegex.exec(line);
+    if (itemMatch && itemMatch[1] && itemMatch[2]) {
+      const current = Number.parseInt(itemMatch[1], 10);
+      const total = Number.parseInt(itemMatch[2], 10);
+      if (current && total) {
+        return Math.floor((current / total) * 100);
+      }
     }
 
-    const progress = Number.parseFloat(matchedProgress);
-    if (Number.isNaN(progress)) {
-      return null;
-    }
-
-    return Math.max(0, Math.min(100, Math.floor(progress)));
+    return null;
   }
 
   /**
@@ -199,6 +251,9 @@ export class YoutubeManager {
       const text = chunk.toString();
       const lines = text.split(/\r?\n/);
       for (const line of lines) {
+        if (line.trim()) {
+          logger.info(`[yt-dlp] ${line}`);
+        }
         const progress = this.extractProgress(line);
         if (progress !== null) {
           this.callbacks.onProgress?.(taskId, progress);
@@ -218,7 +273,7 @@ export class YoutubeManager {
    * @param {DownloadTask} task - 下载任务
    */
   async downloadAudio(taskId: string, task: DownloadTask): Promise<void> {
-    console.log(`[🚀] 正在处理: ${task.url} (ID: ${taskId})`);
+    logger.info("Starting download", { url: task.url, taskId });
 
     this.callbacks.onStart?.(taskId);
 
@@ -226,22 +281,27 @@ export class YoutubeManager {
       await this.ensureHistoryFile();
 
       const cookieArgs = this.getCookieArgs();
+      const jsRuntimeArgs = this.getJsRuntimeArgs();
       const baseArgs: string[] = [];
       
       if (this.proxy) {
         baseArgs.push("--proxy", this.proxy);
       }
       
+      // Opus format with lyrics support
+      // Output: Downloads/Artist/Title/Title.opus
       baseArgs.push(
+        ...jsRuntimeArgs,
         "-f", "ba",
-        "-x", "--audio-format", "mp3",
-        "--audio-quality", "0",
+        "-x", "--audio-format", "opus",
         "--add-metadata",
         "--embed-thumbnail",
+        "--write-subs",
+        "--write-auto-subs",
         "--download-archive",
         path.join(this.downloadDir, "history.txt"),
         "-o",
-        `${this.downloadDir}/%(artist)s - %(title)s.%(ext)s`,
+        `${this.downloadDir}/%(artist)s/%(title)s/%(title)s.%(ext)s`,
         task.url
       );
 
@@ -250,18 +310,18 @@ export class YoutubeManager {
       } catch (error) {
         const errorMsg = this.getErrorMessage(error);
         if (cookieArgs.length > 0 && this.isCookieError(errorMsg)) {
-          console.warn("[⚠️] cookies 读取失败，自动重试（不带 cookies）");
+          logger.warn("Cookie read failed, retrying without cookies", { error: errorMsg });
           await this.runYtDlp(taskId, baseArgs);
         } else {
           throw error;
         }
       }
 
-      console.log(`[✅] 成功: ${task.url}`);
+      logger.info("Download completed", { url: task.url, taskId });
       this.callbacks.onSuccess?.(taskId);
     } catch (error: unknown) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`[❌] 失败: ${task.url}`, errorMsg);
+      logger.error("Download failed", { url: task.url, error: errorMsg });
       this.callbacks.onError?.(taskId, errorMsg);
     }
   }
@@ -271,6 +331,6 @@ export class YoutubeManager {
    * @param {string} taskId - 任务 ID
    */
   cancelDownload(taskId: string): void {
-    console.log(`[⏹️] 取消下载: ${taskId}`);
+    logger.info("Download cancelled", { taskId });
   }
 }
