@@ -1,5 +1,7 @@
+import { memo, useMemo } from "react";
 import type { DownloadTask } from "@yt-auto-downloader/shared";
-import type { JSX } from "react";
+import { Button, Card, Group, Stack, Text, Title } from "@mantine/core";
+import { TaskItem } from "./TaskItem";
 
 interface DownloadListProps {
   tasks: DownloadTask[];
@@ -7,106 +9,43 @@ interface DownloadListProps {
   onClearCompleted: () => void;
 }
 
-export function DownloadList({
+export const DownloadList = memo(function DownloadList({
   tasks,
   onRemove,
   onClearCompleted,
 }: DownloadListProps) {
-  const getStatusLabel = (status: string) => {
-    const labels: Record<string, string> = {
-      pending: "⏳ 等待中",
-      downloading: "⬇️ 下载中",
-      completed: "✅ 已完成",
-      failed: "❌ 失败",
-      paused: "⏸️ 暂停",
-    };
-    return labels[status] || status;
-  };
-
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      pending: "#f59e0b",
-      downloading: "#3b82f6",
-      completed: "#10b981",
-      failed: "#ef4444",
-      paused: "#8b5cf6",
-    };
-    return colors[status] || "#6b7280";
-  };
-
-  const getSafeHostname = (urlValue: unknown): string => {
-    try {
-      if (typeof urlValue !== "string" || !urlValue) {
-        return "未知来源";
-      }
-      return new URL(urlValue).hostname || "未知来源";
-    } catch {
-      if (typeof urlValue === "string") {
-        return urlValue.length > 30 ? `${urlValue.slice(0, 27)}...` : urlValue;
-      }
-      return "未知来源";
-    }
-  };
+  const hasCompleted = useMemo(
+    () => tasks.some((t) => t.status === "completed"),
+    [tasks],
+  );
 
   return (
-    <div className="download-list">
-      <div className="list-header">
-        <h2>📥 下载列表</h2>
-        {tasks.some((t) => t.status === "completed") && (
-          <button className="btn-secondary" onClick={onClearCompleted}>
+    <Card withBorder radius="lg" shadow="sm" p="lg">
+      <Group justify="space-between" mb="md">
+        <Title order={4}>下载列表</Title>
+        {hasCompleted && (
+          <Button variant="light" color="gray" onClick={onClearCompleted}>
             清理已完成
-          </button>
+          </Button>
         )}
-      </div>
+      </Group>
 
       {tasks.length === 0 ? (
-        <div className="empty-state">
-          <p>暂无任务</p>
-          <p className="text-muted">在左侧添加URL开始下载</p>
-        </div>
+        <Stack align="center" justify="center" py={54} gap={4}>
+          <Text c="dimmed" fw={600}>
+            暂无任务
+          </Text>
+          <Text c="dimmed" size="sm">
+            添加 URL 后将在这里显示下载进度
+          </Text>
+        </Stack>
       ) : (
-        <div className="task-list">
+        <Stack gap="sm">
           {tasks.map((task) => (
-            <div key={task.id} className="task-item">
-              <div className="task-info">
-                <div className="task-title">{getSafeHostname(task.url)}</div>
-                <div className="task-url">{task.url}</div>
-                <div className="task-meta">
-                  <span
-                    className="status-badge"
-                    style={{ backgroundColor: getStatusColor(task.status) }}
-                  >
-                    {getStatusLabel(task.status)}
-                  </span>
-                  {task.error && (
-                    <span className="error-text">{task.error}</span>
-                  )}
-                </div>
-              </div>
-
-              {task.status === "downloading" && (
-                <div className="task-progress">
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${task.progress}%` }}
-                    ></div>
-                  </div>
-                  <span className="progress-text">{task.progress}%</span>
-                </div>
-              )}
-
-              <button
-                className="btn-remove"
-                onClick={() => onRemove(task.id)}
-                title="删除"
-              >
-                ✕
-              </button>
-            </div>
+            <TaskItem key={task.id} task={task} onRemove={onRemove} />
           ))}
-        </div>
+        </Stack>
       )}
-    </div>
+    </Card>
   );
-}
+});

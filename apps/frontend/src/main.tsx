@@ -1,7 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./App";
-import "./style.css";
+import { RouterProvider } from "@tanstack/react-router";
+import { router } from "./router";
+import "@mantine/core/styles.css";
+import "@mantine/notifications/styles.css";
+import "./styles/globals.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -11,6 +14,6 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </React.StrictMode>,
 );
