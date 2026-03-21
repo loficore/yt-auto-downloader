@@ -82,7 +82,7 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🎵 YouTube Auto Downloader</h1>
+        <h1>🎵 Yuba</h1>
         <div className="connection-status">
           <span
             className={`status-dot ${connected ? "connected" : "disconnected"}`}

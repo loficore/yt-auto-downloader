@@ -9,7 +9,7 @@ export function AppLayout(): JSX.Element {
         <Container size="xl" h="100%">
           <Group h="100%" justify="space-between" wrap="nowrap">
             <Text fw={700} size="lg" c="dark.8">
-              YouTube Auto Downloader
+              Yuba
             </Text>
             <Group gap="xs" wrap="nowrap">
               <Link

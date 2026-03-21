@@ -31,7 +31,7 @@ interface Subscription {
   url: string;
   name: string;
   enabled: boolean;
-  maxItems: number;
+  limitPerSync: number | null;
   lastSyncedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -45,7 +45,7 @@ interface SchedulerStatus {
   isRunning: boolean;
 }
 
-const DEFAULT_MAX_ITEMS = 100;
+const DEFAULT_LIMIT_PER_SYNC = 10;
 
 /**
  *  播放列表页面组件
@@ -58,7 +58,7 @@ const DEFAULT_MAX_ITEMS = 100;
 export function PlaylistsPage(): JSX.Element {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
-  const [maxItems, setMaxItems] = useState(DEFAULT_MAX_ITEMS);
+  const [limitPerSync, setLimitPerSync] = useState(DEFAULT_LIMIT_PER_SYNC);
   const [isAdding, setIsAdding] = useState(false);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(
@@ -102,14 +102,14 @@ export function PlaylistsPage(): JSX.Element {
               name.trim() ||
               new URL(url.trim()).pathname.split("/").pop() ||
               "Playlist",
-            maxItems,
+            limitPerSync,
           }),
         });
         const data = await res.json();
         if (data.success) {
           setUrl("");
           setName("");
-          setMaxItems(DEFAULT_MAX_ITEMS);
+          setLimitPerSync(DEFAULT_LIMIT_PER_SYNC);
           void fetchData();
         }
       } catch (error) {
@@ -217,14 +217,14 @@ export function PlaylistsPage(): JSX.Element {
           </Grid.Col>
           <Grid.Col span={{ base: 12, sm: 6, lg: 2 }}>
             <NumberInput
-              value={maxItems}
+              value={limitPerSync}
               onChange={(value) =>
-                setMaxItems(typeof value === "number" && value > 0 ? value : 1)
+                setLimitPerSync(typeof value === "number" && value > 0 ? value : 1)
               }
               min={1}
               max={10000}
-              label="Max items"
-              placeholder="100"
+              label="Limit per sync"
+              placeholder="10"
               leftSection={<IconHash size={16} />}
             />
           </Grid.Col>
@@ -338,7 +338,7 @@ export function PlaylistsPage(): JSX.Element {
                         {sub.url}
                       </Text>
                     </Table.Td>
-                    <Table.Td>{sub.maxItems}</Table.Td>
+                    <Table.Td>{sub.limitPerSync}</Table.Td>
                     <Table.Td>{formatDate(sub.lastSyncedAt)}</Table.Td>
                     <Table.Td>
                       <Switch
