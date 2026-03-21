@@ -12,7 +12,8 @@
     "eslint-plugin-jsdoc": "^62.8.0",
     "postcss": "^8.5.8",
     "typescript": "^5.3.0",
-    "typescript-eslint": "latest"
+    "typescript-eslint": "latest",
+    "vitest": "^4.1.0"
   },
   "private": true,
   "scripts": {
@@ -23,7 +24,11 @@
     "start": "bun run --filter @yt-auto-downloader/backend start",
     "lint": "eslint apps --ext .ts,.tsx --ignore-pattern '**/dist/**' --ignore-pattern '**/node_modules/**'",
     "build:check": "bun run --filter @yt-auto-downloader/backend build:check",
-    "test": "bun test"
+    "test": "bun run test:backend && bun run test:shared && bun run test:frontend",
+    "test:watch": "bun test --watch",
+    "test:backend": "bun run --filter @yt-auto-downloader/backend test",
+    "test:shared": "bun run --filter @yt-auto-downloader/shared test",
+    "test:frontend": "bun run --filter @yt-auto-downloader/frontend test"
   },
   "type": "module",
   "workspaces": [
