@@ -13,7 +13,7 @@ function transformSubscription(sub: ReturnType<DatabaseService["getSubscriptions
     url: sub.url,
     name: sub.name,
     enabled: sub.enabled,
-    maxItems: sub.max_items,
+    limitPerSync: sub.limit_per_sync,
     lastSyncedAt: sub.last_synced_at,
     createdAt: sub.created_at,
     updatedAt: sub.updated_at,
@@ -37,7 +37,7 @@ export function createSubscriptionsAPI({ db, queue }: SubscriptionAPIContext) {
     .post(
       "",
       ({ body }) => {
-        const { url, name, maxItems } = body;
+        const { url, name, limitPerSync } = body;
         const existing = db.getSubscriptions();
         const found = existing.find((s) => s.url === url);
 
@@ -48,7 +48,7 @@ export function createSubscriptionsAPI({ db, queue }: SubscriptionAPIContext) {
           };
         }
 
-        const subscription = db.addSubscription(url, name, maxItems);
+        const subscription = db.addSubscription(url, name, limitPerSync);
         return {
           success: true,
           data: transformSubscription(subscription),
@@ -58,7 +58,7 @@ export function createSubscriptionsAPI({ db, queue }: SubscriptionAPIContext) {
         body: t.Object({
           url: t.String({ minLength: 1 }),
           name: t.String({ minLength: 1 }),
-          maxItems: t.Optional(t.Number({ minimum: 1 })),
+          limitPerSync: t.Optional(t.Number({ minimum: 1 })),
         }),
       },
     )
@@ -66,18 +66,18 @@ export function createSubscriptionsAPI({ db, queue }: SubscriptionAPIContext) {
       "/:id",
       ({ params, body }) => {
         const { id } = params;
-        const { name, enabled, maxItems } = body;
+        const { name, enabled, limitPerSync } = body;
 
         const updates: Partial<{
           name: string;
           enabled: boolean;
-          max_items: number;
+          limit_per_sync: number | null;
           last_synced_at: number | null;
         }> = {};
 
         if (name !== undefined) updates.name = name;
         if (enabled !== undefined) updates.enabled = enabled;
-        if (maxItems !== undefined) updates.max_items = maxItems;
+        if (limitPerSync !== undefined) updates.limit_per_sync = limitPerSync;
 
         const success = db.updateSubscription(id, updates);
 
@@ -101,7 +101,7 @@ export function createSubscriptionsAPI({ db, queue }: SubscriptionAPIContext) {
         body: t.Object({
           name: t.Optional(t.String({ minLength: 1 })),
           enabled: t.Optional(t.Boolean()),
-          maxItems: t.Optional(t.Number({ minimum: 1 })),
+          limitPerSync: t.Optional(t.Number({ minimum: 1 })),
         }),
       },
     )

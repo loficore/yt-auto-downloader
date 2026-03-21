@@ -32,6 +32,12 @@ export interface Config {
   schedulerCron: string;
   /** 时区 */
   timezone: string;
+  /** 每分钟最大下载数 (RPM) */
+  maxDownloadsPerMinute: number;
+  /** 最小随机延迟 (毫秒) */
+  downloadDelayMin: number;
+  /** 最大随机延迟 (毫秒) */
+  downloadDelayMax: number;
 }
 
 function getEnv(key: string, defaultValue?: string): string | undefined {
@@ -56,6 +62,9 @@ export const config = {
   schedulerEnabled: getEnv('SCHEDULER_ENABLED', 'true') === 'true',
   schedulerCron: getEnv('SCHEDULER_CRON', '0 6 * * *'),
   timezone: getEnv('TIMEZONE', 'UTC'),
+  maxDownloadsPerMinute: Number.parseInt(getEnv('MAX_DOWNLOADS_PER_MINUTE') || '5', 10),
+  downloadDelayMin: Number.parseInt(getEnv('DOWNLOAD_DELAY_MIN') || '1000', 10),
+  downloadDelayMax: Number.parseInt(getEnv('DOWNLOAD_DELAY_MAX') || '5000', 10),
 };
 
 const cookieSource = config.ytDlpCookiesFile
@@ -73,4 +82,7 @@ console.log('[⚙️] 配置加载完成:', {
   schedulerEnabled: config.schedulerEnabled,
   schedulerCron: config.schedulerCron,
   timezone: config.timezone,
+  maxDownloadsPerMinute: config.maxDownloadsPerMinute,
+  downloadDelayMin: config.downloadDelayMin,
+  downloadDelayMax: config.downloadDelayMax,
 });
