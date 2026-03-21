@@ -65,8 +65,9 @@ export class PlaylistService {
           const cookiePath = isAbsolute(config.ytDlpCookiesFile)
             ? config.ytDlpCookiesFile
             : resolve(rootDir, config.ytDlpCookiesFile);
-          const cookies = readFileSync(cookiePath, "utf-8");
-          options.cookie = cookies;
+          const cookieContent = readFileSync(cookiePath, "utf-8");
+          const cookieHeader = this.parseNetscapeCookies(cookieContent);
+          options.cookie = cookieHeader;
           logger.info("Cookie file loaded", { path: cookiePath });
         } catch (error) {
           logger.warn("Failed to read cookie file", { error });
@@ -78,6 +79,27 @@ export class PlaylistService {
     }
 
     return this.innertube;
+  }
+
+  private parseNetscapeCookies(content: string): string {
+    const lines = content.split("\n");
+    const cookies: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("#") || trimmed === "") continue;
+
+      const parts = trimmed.split("\t");
+      if (parts.length >= 7) {
+        const name = parts[5];
+        const value = parts[6];
+        if (name && value) {
+          cookies.push(`${name}=${value}`);
+        }
+      }
+    }
+
+    return cookies.join("; ");
   }
 
   /**

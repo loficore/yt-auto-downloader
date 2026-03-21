@@ -3,6 +3,7 @@ import path, { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { config } from "../config";
 import { logger } from "@yt-auto-downloader/shared";
+import { DownloadVerifier } from "./DownloadVerifier";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
@@ -48,6 +49,7 @@ export class YoutubeManager {
   private callbacks: DownloadCallbacks = {};
   private progressRegex = /\[download\]\s+(\d+(?:\.\d+)?)%/;
   private itemRegex = /\[download\]\s+Downloading item (\d+) of (\d+)/;
+  private verifier: DownloadVerifier;
 
   /**
    * 初始化 YoutubeManager
@@ -60,6 +62,7 @@ export class YoutubeManager {
     this.cookieBrowser = config.ytDlpCookiesFromBrowser;
     this.cookieFile = config.ytDlpCookiesFile;
     this.ytDlpJsRuntimes = config.ytDlpJsRuntimes;
+    this.verifier = new DownloadVerifier(this.downloadDir);
     if (this.proxy) {
       logger.info("Using proxy", { proxy: this.proxy });
     } else {
@@ -317,7 +320,16 @@ export class YoutubeManager {
         }
       }
 
-      logger.info("Download completed", { url: task.url, taskId });
+      logger.info("Download completed, verifying...", { url: task.url, taskId });
+      const verifyResult = await this.verifier.verifyAndCleanup(task.url);
+
+      if (!verifyResult.valid) {
+        logger.error("Download verification failed", { url: task.url, taskId, reason: verifyResult.reason });
+        this.callbacks.onError?.(taskId, `Verification failed: ${verifyResult.reason}`);
+        return;
+      }
+
+      logger.info("Download verified successfully", { url: task.url, taskId, fileSize: verifyResult.fileSize });
       this.callbacks.onSuccess?.(taskId);
     } catch (error: unknown) {
       const errorMsg = this.getErrorMessage(error);

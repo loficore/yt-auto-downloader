@@ -39,8 +39,8 @@ export interface SubscriptionRecord {
   name: string;
   /** 是否启用 */
   enabled: boolean;
-  /** 最大下载数量 */
-  max_items: number;
+  /** 每次同步最大下载数量 */
+  limit_per_sync: number | null;
   /** 上次同步时间（Unix 时间戳） */
   last_synced_at: number | null;
   /** 创建时间（Unix 时间戳） */
@@ -133,7 +133,7 @@ export class DatabaseService {
         url TEXT NOT NULL UNIQUE,
         name TEXT NOT NULL,
         enabled INTEGER DEFAULT 1,
-        max_items INTEGER DEFAULT 100,
+        limit_per_sync INTEGER DEFAULT 10,
         last_synced_at INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -147,6 +147,12 @@ export class DatabaseService {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_videos_downloaded ON videos(downloaded)
     `);
+
+    try {
+      this.db.run(`ALTER TABLE subscriptions ADD COLUMN limit_per_sync INTEGER DEFAULT 10`);
+    } catch {
+      // Column already exists
+    }
 
     console.log("[💾] 数据库初始化完成:", this.dbPath);
   }
@@ -336,7 +342,7 @@ export class DatabaseService {
       url: string;
       name: string;
       enabled: number;
-      max_items: number;
+      limit_per_sync: number | null;
       last_synced_at: number | null;
       created_at: number;
       updated_at: number;
@@ -347,7 +353,7 @@ export class DatabaseService {
       url: row.url,
       name: row.name,
       enabled: row.enabled === 1,
-      max_items: row.max_items,
+      limit_per_sync: row.limit_per_sync,
       last_synced_at: row.last_synced_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -367,7 +373,7 @@ export class DatabaseService {
       url: string;
       name: string;
       enabled: number;
-      max_items: number;
+      limit_per_sync: number | null;
       last_synced_at: number | null;
       created_at: number;
       updated_at: number;
@@ -378,7 +384,7 @@ export class DatabaseService {
       url: row.url,
       name: row.name,
       enabled: row.enabled === 1,
-      max_items: row.max_items,
+      limit_per_sync: row.limit_per_sync,
       last_synced_at: row.last_synced_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -392,21 +398,21 @@ export class DatabaseService {
    * @param {number} maxItems 最大下载数量
    * @returns {SubscriptionRecord} 新添加的订阅
    */
-  addSubscription(url: string, name: string, maxItems = 100): SubscriptionRecord {
+  addSubscription(url: string, name: string, limitPerSync: number | null = 10): SubscriptionRecord {
     const now = Date.now();
     const id = crypto.randomUUID();
     const stmt = this.db.prepare(`
-      INSERT INTO subscriptions (id, url, name, enabled, max_items, last_synced_at, created_at, updated_at)
+      INSERT INTO subscriptions (id, url, name, enabled, limit_per_sync, last_synced_at, created_at, updated_at)
       VALUES (?, ?, ?, 1, ?, NULL, ?, ?)
     `);
-    stmt.run(id, url, name, maxItems, now, now);
+    stmt.run(id, url, name, limitPerSync, now, now);
 
     return {
       id,
       url,
       name,
       enabled: true,
-      max_items: maxItems,
+      limit_per_sync: limitPerSync,
       last_synced_at: null,
       created_at: now,
       updated_at: now,
@@ -434,9 +440,9 @@ export class DatabaseService {
       fields.push("enabled = ?");
       values.push(updates.enabled ? 1 : 0);
     }
-    if (updates.max_items !== undefined) {
-      fields.push("max_items = ?");
-      values.push(updates.max_items);
+    if (updates.limit_per_sync !== undefined) {
+      fields.push("limit_per_sync = ?");
+      values.push(updates.limit_per_sync);
     }
     if (updates.last_synced_at !== undefined) {
       fields.push("last_synced_at = ?");

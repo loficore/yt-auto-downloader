@@ -134,9 +134,13 @@ export class Scheduler {
             id: subscription.id,
             name: subscription.name,
             url: subscription.url,
+            limitPerSync: subscription.limit_per_sync,
           });
 
-          const result = await this.queue.syncPlaylist(subscription.url);
+          const result = await this.queue.syncPlaylist(
+            subscription.url,
+            subscription.limit_per_sync ?? undefined,
+          );
 
           this.db.updateSubscription(subscription.id, {
             last_synced_at: Date.now(),

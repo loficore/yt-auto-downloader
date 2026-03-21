@@ -1,6 +1,7 @@
 import { YoutubeManager } from "./YoutubeManager";
 import { PlaylistService } from "./PlaylistService";
 import { DatabaseService, type TaskRecord } from "./Database";
+import { RateLimiter } from "./RateLimiter";
 import type { DownloadStatus, QueueInfo } from "@yt-auto-downloader/shared";
 import { config } from "../config";
 import { logger } from "@yt-auto-downloader/shared";
@@ -37,6 +38,7 @@ export class DownloadQueue {
   private youtubeManager: YoutubeManager;
   private playlistService: PlaylistService;
   private db: DatabaseService;
+  private rateLimiter: RateLimiter;
   private callbacks: {
     /**  任务更新回调 */
     onTaskUpdated?: (task: QueueTask) => void;
@@ -56,6 +58,11 @@ export class DownloadQueue {
     this.maxConcurrent = maxConcurrent;
     this.db = db || new DatabaseService();
     this.playlistService = new PlaylistService();
+    this.rateLimiter = new RateLimiter(
+      config.maxDownloadsPerMinute || 5,
+      config.downloadDelayMin || 1000,
+      config.downloadDelayMax || 5000,
+    );
     this.youtubeManager = new YoutubeManager(downloadDir, {
       /**
        * 下载开始回调
@@ -113,14 +120,15 @@ export class DownloadQueue {
   /**
    * 同步播放列表
    * @param {string} playlistUrl - 播放列表URL
+   * @param {number} [limit] - 每次同步的最大下载数量，默认使用全局配置
    * @returns {{ added: number; total: number; downloaded: number }} 添加的任务数统计
    */
-  async syncPlaylist(playlistUrl: string): Promise<{
+  async syncPlaylist(playlistUrl: string, limit?: number): Promise<{
     added: number;
     total: number;
     downloaded: number;
   }> {
-    logger.info("syncPlaylist called", { playlistUrl });
+    logger.info("syncPlaylist called", { playlistUrl, limit });
     
     const playlist = await this.playlistService.getPlaylist(playlistUrl);
     if (!playlist) {
@@ -136,7 +144,8 @@ export class DownloadQueue {
     this.db.saveVideos(videoRecords);
 
     // 获取未下载的视频（限制数量）
-    const maxDownloads = config.maxDownloadsPerSync || 10;
+    // 如果传入了 limit 参数则使用，否则使用全局配置
+    const maxDownloads = limit ?? config.maxDownloadsPerSync ?? 10;
     const undownloadedVideos = this.db.getUndownloadedVideos(
       playlist.id,
       maxDownloads,
@@ -274,25 +283,35 @@ export class DownloadQueue {
    * 处理下载队列
    */
   private processQueue(): void {
-    while (this.downloading.size < this.maxConcurrent) {
-      const task = Array.from(this.queue.values()).find(
-        (t) => t.status === "pending",
-      );
+    if (this.downloading.size >= this.maxConcurrent) return;
 
-      if (!task) break;
+    const task = Array.from(this.queue.values()).find(
+      (t) => t.status === "pending",
+    );
 
-      this.downloading.add(task.id);
+    if (!task) return;
 
-      void this.youtubeManager
-        .downloadAudio(task.id, {
-          url: task.url,
-          artist: task.artist,
-        })
-        .finally(() => {
-          this.downloading.delete(task.id);
-          this.processQueue();
-        });
+    const delay = this.rateLimiter.getNextDelay();
+    const rateInfo = this.rateLimiter.getInfo();
+
+    if (delay > 0) {
+      logger.info(`Rate limit: waiting ${Math.round(delay)}ms (window: ${rateInfo.currentCount}/${rateInfo.rpm})`);
+      setTimeout(() => this.processQueue(), delay);
+      return;
     }
+
+    this.downloading.add(task.id);
+
+    void this.youtubeManager
+      .downloadAudio(task.id, {
+        url: task.url,
+        artist: task.artist,
+      })
+      .finally(() => {
+        this.downloading.delete(task.id);
+        this.rateLimiter.recordSuccess();
+        this.processQueue();
+      });
   }
 
   /**
