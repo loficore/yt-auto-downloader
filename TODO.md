@@ -195,6 +195,38 @@
 - [ ] 更新 Dockerfile - 添加 ffmpeg 支持
 - [ ] 编写 DownloadVerifier 单元测试
 
+## 用户体验改进
+
+### 前端下载列表显示优化
+- [x] 修改 TaskItem.tsx - 显示 title + artist，URL 作为次要信息
+- [x] 修改 DownloadList.tsx - 添加状态筛选功能（全部/下载中/已完成/失败）
+
+### 下载任务自动清理
+- [x] 修改 config.ts - 添加 AUTO_CLEAR_DAYS 配置（默认 30 天）
+- [x] 修改 Database.ts - 添加 clearExpiredTasks() 方法
+- [x] 修改 DownloadQueue.ts - 定时清理过期的 completed 任务
+- [x] 更新 .env.example - 添加清理配置
+
+## 播放列表下载逻辑修复
+
+### 修复重复下载问题
+- [ ] 修改 Database.ts - saveVideos() 保留已下载状态，不覆盖
+- [ ] 新增 checkAndMarkExistingFiles() - 检查本地文件，存在则标记已下载
+- [ ] 修改 DownloadQueue.ts - syncPlaylist() 先检查本地文件再创建任务
+
+### 记录下载位置
+- [ ] 修改 subscriptions 表 - 添加 last_position 字段
+- [ ] 修改 Database.ts - 新增 getNextVideosToDownload() 方法（按 position 顺序）
+- [ ] 修改 DownloadQueue.ts - 从 last_position 位置开始下载
+
+### 修复 Artist 显示
+- [ ] 修改 PlaylistService.ts - 修复 artist 字段提取逻辑
+
+## 待补充
+- DownloadQueue 单元测试 (依赖复杂，已跳过)
+- E2E 测试 (需 Playwright 等工具)
+- Server graceful shutdown 测试
+
 ## 测试统计 (2026-03-21)
 
 | 模块 | 测试数 | 状态 |

@@ -20,6 +20,7 @@ export default tseslint.config(
       "scripts/**",
       "eslint.config.js",
       "apps/**/vite.config.ts",
+      "apps/**/vitest.config.ts",
       "apps/**/test/**",
     ],
   },
