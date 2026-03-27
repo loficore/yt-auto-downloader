@@ -7,9 +7,10 @@ export class RateLimiter {
   private timestamps: number[] = [];
 
   /**
-   * @param rpm - 每分钟最大下载数
-   * @param minDelay - 最小随机延迟 (毫秒)
-   * @param maxDelay - 最大随机延迟 (毫秒)
+   * 构造函数
+   * @param {number} rpm - 每分钟最大下载数
+   * @param {number} minDelay - 最小随机延迟 (毫秒)
+   * @param {number} maxDelay - 最大随机延迟 (毫秒)
    */
   constructor(
     private rpm = 5,
@@ -27,7 +28,7 @@ export class RateLimiter {
 
   /**
    * 计算下次可执行还需等待的时间 (毫秒)
-   * @returns 需要等待的毫秒数，0 表示立即可执行
+   * @returns {number} 需要等待的毫秒数，0 表示立即可执行
    */
   getNextDelay(): number {
     this.cleanExpiredTimestamps();
@@ -53,7 +54,7 @@ export class RateLimiter {
 
   /**
    * 获取当前窗口内已执行的次数
-   * @returns 当前窗口内已执行的次数
+   * @returns {number} 当前窗口内已执行的次数
    */
   getCurrentCount(): number {
     this.cleanExpiredTimestamps();
@@ -62,7 +63,7 @@ export class RateLimiter {
 
   /**
    * 获取当前配置信息
-   * @returns 配置信息对象
+   * @returns {object} 配置信息对象
    */
   getInfo(): { rpm: number; minDelay: number; maxDelay: number; currentCount: number } {
     this.cleanExpiredTimestamps();

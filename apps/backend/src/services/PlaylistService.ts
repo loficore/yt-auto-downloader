@@ -2,7 +2,6 @@ import { Innertube } from "youtubei.js";
 import { readFileSync } from "fs";
 import { dirname, resolve, isAbsolute } from "path";
 import { fileURLToPath } from "url";
-import type { VideoRecord } from "./Database";
 import { config } from "../config";
 import { logger } from "@yt-auto-downloader/shared";
 
@@ -160,14 +159,23 @@ export class PlaylistService {
           id: string;
           title?: { text?: string };
           author?: { name?: { text?: string } };
+          channelTitle?: string;
+          shortBylineText?: { text?: string }[];
           duration?: { seconds?: number };
         };
 
         if (video.id) {
+          // 尝试多个字段获取艺术家名称
+          const artist =
+            video.author?.name?.text ||
+            video.channelTitle ||
+            (video.shortBylineText && video.shortBylineText[0]?.text) ||
+            "Unknown";
+
           videos.push({
             id: video.id,
             title: video.title?.text || "Unknown",
-            artist: video.author?.name?.text || "Unknown",
+            artist,
             duration: video.duration?.seconds || null,
             url: `https://www.youtube.com/watch?v=${video.id}`,
             position: position++,
@@ -188,25 +196,6 @@ export class PlaylistService {
       logger.error("Failed to get playlist", { error });
       return null;
     }
-  }
-
-  /**
-   * 转换播放列表视频为数据库记录格式
-   * @param {string} playlistId 播放列表ID
-   * @param {PlaylistVideo[]} videos 视频列表
-   * @returns {VideoRecord[]} 数据库记录数组
-   */
-  toVideoRecords(playlistId: string, videos: PlaylistVideo[]): VideoRecord[] {
-    return videos.map((video) => ({
-      id: video.id,
-      playlist_id: playlistId,
-      title: video.title,
-      artist: video.artist,
-      duration: video.duration,
-      downloaded: false,
-      downloaded_at: null,
-      position: video.position,
-    }));
   }
 
   /**

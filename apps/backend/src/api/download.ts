@@ -11,6 +11,7 @@ function transformQueueTaskToDownloadTask(queueTask: unknown): DownloadTask {
   const task = queueTask as Record<string, unknown>;
   const id = task.id as string;
   const url = task.url as string;
+  const title = task.title as string | undefined;
   const artist = task.artist as string | undefined;
   const status = task.status as DownloadTask["status"];
   const error = task.error as string | undefined;
@@ -18,8 +19,8 @@ function transformQueueTaskToDownloadTask(queueTask: unknown): DownloadTask {
   return {
     id: id ?? "",
     url: url ?? "",
-    title: artist ?? url ?? "未知标题",
-    artist: artist ?? "",
+    title: title ?? url ?? "未知标题",
+    artist: artist ?? "Unknown",
     album: "",
     status: status ?? "pending",
     progress: Number(task.progress ?? 0),
@@ -39,7 +40,7 @@ export function createDownloadAPI(queue: DownloadQueue) {
     .post(
       "/add",
       ({ body }) => {
-        const taskId = queue.addTask(body.url, body.artist);
+        const taskId = queue.addTask(body.url, body.title, body.artist);
         const queueTask = queue.getTask(taskId);
         return {
           success: true,
@@ -54,6 +55,7 @@ export function createDownloadAPI(queue: DownloadQueue) {
       {
         body: t.Object({
           url: t.String({ minLength: 1 }),
+          title: t.Optional(t.String()),
           artist: t.Optional(t.String()),
         }),
       },
@@ -108,6 +110,27 @@ export function createDownloadAPI(queue: DownloadQueue) {
       return {
         success: true,
         data: task ? transformQueueTaskToDownloadTask(task) : null,
+      };
+    })
+    .post("/task/:id/retry", ({ params }) => {
+      const task = queue.getTask(params.id);
+      if (!task) {
+        return {
+          success: false,
+          error: "Task not found",
+        };
+      }
+      if (task.status !== "failed") {
+        return {
+          success: false,
+          error: "Only failed tasks can be retried",
+        };
+      }
+      queue.retryTask(params.id);
+      const retriedTask = queue.getTask(params.id);
+      return {
+        success: true,
+        data: retriedTask ? transformQueueTaskToDownloadTask(retriedTask) : null,
       };
     })
     .post("/clear-completed", () => {

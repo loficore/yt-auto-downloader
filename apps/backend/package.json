@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun --watch src/server.ts",
     "start": "bun run src/server.ts",
+    "migrate:drop-legacy-tables": "bun run src/scripts/migrate-drop-legacy-tables.ts",
     "lint": "eslint . --ext .ts",
     "build:check": "tsc --noEmit",
     "test": "bun test",

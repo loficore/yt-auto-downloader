@@ -1,10 +1,12 @@
 import { YoutubeManager } from "./YoutubeManager";
 import { PlaylistService } from "./PlaylistService";
-import { DatabaseService, type TaskRecord } from "./Database";
+import { DatabaseService } from "./Database";
 import { RateLimiter } from "./RateLimiter";
 import type { DownloadStatus, QueueInfo } from "@yt-auto-downloader/shared";
 import { config } from "../config";
 import { logger } from "@yt-auto-downloader/shared";
+import { readdirSync } from "fs";
+import { extname, join } from "path";
 
 /**
  * 队列中的下载任务
@@ -14,6 +16,8 @@ export interface QueueTask {
   id: string;
   /** 下载链接 */
   url: string;
+  /** 视频标题 */
+  title?: string;
   /** 艺术家名称（可选） */
   artist?: string;
   /** 任务状态 */
@@ -26,6 +30,8 @@ export interface QueueTask {
   updatedAt: number;
   /** 错误信息（如果有） */
   error?: string;
+  /** 所属播放列表 ID（仅歌单同步任务） */
+  playlistId?: string;
 }
 
 /**
@@ -35,10 +41,17 @@ export class DownloadQueue {
   private queue: Map<string, QueueTask> = new Map();
   private downloading: Set<string> = new Set();
   private maxConcurrent: number;
+  private downloadDir: string;
   private youtubeManager: YoutubeManager;
   private playlistService: PlaylistService;
   private db: DatabaseService;
   private rateLimiter: RateLimiter;
+  private localDownloadedIds: Set<string> = new Set();
+  private localIndexBuilt = false;
+  private downloadedByPlaylist: Map<string, Set<string>> = new Map();
+  private playlistStatsCache: Map<string, { total: number; downloaded: number }> =
+    new Map();
+  private readonly audioExtensions = new Set([".opus", ".m4a", ".webm", ".mp3"]);
   private callbacks: {
     /**  任务更新回调 */
     onTaskUpdated?: (task: QueueTask) => void;
@@ -56,6 +69,7 @@ export class DownloadQueue {
    */
   constructor(downloadDir: string, maxConcurrent = 1, db?: DatabaseService) {
     this.maxConcurrent = maxConcurrent;
+    this.downloadDir = downloadDir;
     this.db = db || new DatabaseService();
     this.playlistService = new PlaylistService();
     this.rateLimiter = new RateLimiter(
@@ -102,15 +116,20 @@ export class DownloadQueue {
   private handleDownloadSuccess(taskId: string): void {
     const task = this.queue.get(taskId);
     if (task) {
-      // 标记视频为已下载
-      const url = task.url;
-      const videoIdMatch = url.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+      const videoIdMatch = task.url.match(/[?&]v=([a-zA-Z0-9_-]+)/);
       if (videoIdMatch && videoIdMatch[1]) {
         const videoId = videoIdMatch[1];
-        // 尝试从 URL 中获取 playlist_id（如果有）
-        const playlistIdMatch = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
-        if (playlistIdMatch && playlistIdMatch[1]) {
-          this.db.markVideoDownloaded(videoId, playlistIdMatch[1]);
+        this.localDownloadedIds.add(videoId);
+
+        if (task.playlistId) {
+          const downloadedSet = this.getPlaylistDownloadedSet(task.playlistId);
+          downloadedSet.add(videoId);
+
+          const stats = this.playlistStatsCache.get(task.playlistId);
+          if (stats) {
+            stats.downloaded = Math.min(stats.total, downloadedSet.size);
+            this.playlistStatsCache.set(task.playlistId, stats);
+          }
         }
       }
     }
@@ -119,16 +138,17 @@ export class DownloadQueue {
 
   /**
    * 同步播放列表
-   * @param {string} playlistUrl - 播放列表URL
+   * @param {string} playlistUrl - 播放列表 URL
    * @param {number} [limit] - 每次同步的最大下载数量，默认使用全局配置
+   * @param {string} [subscriptionId] - 订阅 ID（用于记录下载位置）
    * @returns {{ added: number; total: number; downloaded: number }} 添加的任务数统计
    */
-  async syncPlaylist(playlistUrl: string, limit?: number): Promise<{
+  async syncPlaylist(playlistUrl: string, limit?: number, subscriptionId?: string): Promise<{
     added: number;
     total: number;
     downloaded: number;
   }> {
-    logger.info("syncPlaylist called", { playlistUrl, limit });
+    logger.info("syncPlaylist called", { playlistUrl, limit, subscriptionId });
     
     const playlist = await this.playlistService.getPlaylist(playlistUrl);
     if (!playlist) {
@@ -136,30 +156,44 @@ export class DownloadQueue {
       return { added: 0, total: 0, downloaded: 0 };
     }
 
-    // 保存视频信息到数据库
-    const videoRecords = this.playlistService.toVideoRecords(
-      playlist.id,
-      playlist.videos,
-    );
-    this.db.saveVideos(videoRecords);
+    void subscriptionId;
+    this.ensureLocalDownloadedIndex();
 
-    // 获取未下载的视频（限制数量）
-    // 如果传入了 limit 参数则使用，否则使用全局配置
+    const downloadedSet = this.getPlaylistDownloadedSet(playlist.id);
+    for (const video of playlist.videos) {
+      if (this.localDownloadedIds.has(video.id)) {
+        downloadedSet.add(video.id);
+      }
+    }
+
+    // 获取待下载的视频（纯内存计算）
     const maxDownloads = limit ?? config.maxDownloadsPerSync ?? 10;
-    const undownloadedVideos = this.db.getUndownloadedVideos(
-      playlist.id,
-      maxDownloads,
-    );
+    const videosToDownload = playlist.videos
+      .filter((video) => !downloadedSet.has(video.id))
+      .slice(0, maxDownloads);
 
     // 创建下载任务
     let added = 0;
-    for (const video of undownloadedVideos) {
+    for (const video of videosToDownload) {
+      if (this.hasTaskForVideo(video.id)) {
+        continue;
+      }
+
       const url = `https://www.youtube.com/watch?v=${video.id}`;
-      this.addTask(url, video.artist || undefined);
+      this.addTask(
+        url,
+        video.title ?? undefined,
+        video.artist ?? undefined,
+        playlist.id,
+      );
       added++;
     }
 
-    const stats = this.db.getPlaylistStats(playlist.id);
+    const stats = {
+      total: playlist.videos.length,
+      downloaded: downloadedSet.size,
+    };
+    this.playlistStatsCache.set(playlist.id, stats);
 
     logger.info("Playlist sync completed", {
       added,
@@ -180,58 +214,7 @@ export class DownloadQueue {
    * @returns {{ total: number; downloaded: number }} 统计信息
    */
   getPlaylistStats(playlistId: string): { total: number; downloaded: number } {
-    return this.db.getPlaylistStats(playlistId);
-  }
-
-  /**
-   * 从数据库加载任务
-   */
-  loadFromDatabase(): void {
-    const records = this.db.loadTasks();
-
-    for (const record of records) {
-      // downloading 状态可能是崩溃导致，重置为 pending
-      const status: DownloadStatus =
-        record.status === "downloading" ? "pending" : record.status;
-
-      const task: QueueTask = {
-        id: record.id,
-        url: record.url,
-        artist: record.artist ?? undefined,
-        status,
-        progress: record.progress,
-        createdAt: record.created_at,
-        updatedAt: record.updated_at,
-        error: record.error ?? undefined,
-      };
-
-      this.queue.set(task.id, task);
-    }
-
-    // 自动重试 pending 任务
-    this.processQueue();
-    logger.info("Tasks loaded from database", { count: records.length });
-  }
-
-  /**
-   * 保存任务到数据库
-   * @param {QueueTask} task - 任务对象
-   */
-  private saveTask(task: QueueTask): void {
-    const record: TaskRecord = {
-      id: task.id,
-      url: task.url,
-      artist: task.artist ?? null,
-      title: null,
-      album: null,
-      status: task.status,
-      progress: task.progress,
-      error: task.error ?? null,
-      created_at: task.createdAt,
-      updated_at: task.updatedAt,
-      file_path: null,
-    };
-    this.db.saveTask(record);
+    return this.playlistStatsCache.get(playlistId) ?? { total: 0, downloaded: 0 };
   }
 
   /**
@@ -245,24 +228,26 @@ export class DownloadQueue {
   /**
    * 添加单个下载任务
    * @param {string} url - YouTube URL
+   * @param {string} [title] - 视频标题（可选）
    * @param {string} [artist] - 艺术家名称（可选）
    * @returns {string} 任务 ID
    */
-  addTask(url: string, artist?: string): string {
+  addTask(url: string, title?: string, artist?: string, playlistId?: string): string {
     const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
     const task: QueueTask = {
       id,
       url,
+      title,
       artist,
       status: "pending",
       progress: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      playlistId,
     };
 
     this.queue.set(id, task);
-    this.saveTask(task);
     this.callbacks.onTaskUpdated?.(task);
     this.callbacks.onQueueChanged?.();
 
@@ -277,6 +262,35 @@ export class DownloadQueue {
    */
   addBulkTasks(urls: string[]): string[] {
     return urls.map((url) => this.addTask(url));
+  }
+
+  /**
+   * 获取视频信息并下载
+   * @param {QueueTask} task - 任务
+   */
+  private async fetchAndDownload(task: QueueTask): Promise<void> {
+    try {
+      const info = await this.youtubeManager.getVideoInfo(task.url) as { title?: string; artist?: string } | null;
+      if (info) {
+        task.title = info.title;
+        task.artist = info.artist;
+        this.callbacks.onTaskUpdated?.(task);
+      }
+    } catch (err) {
+      logger.warn("Failed to get video info, using URL as title", { taskId: task.id, error: err });
+    }
+
+    try {
+      await this.youtubeManager.downloadAudio(task.id, {
+        url: task.url,
+        title: task.title,
+        artist: task.artist,
+      });
+    } finally {
+      this.downloading.delete(task.id);
+      this.rateLimiter.recordSuccess();
+      this.processQueue();
+    }
   }
 
   /**
@@ -302,16 +316,7 @@ export class DownloadQueue {
 
     this.downloading.add(task.id);
 
-    void this.youtubeManager
-      .downloadAudio(task.id, {
-        url: task.url,
-        artist: task.artist,
-      })
-      .finally(() => {
-        this.downloading.delete(task.id);
-        this.rateLimiter.recordSuccess();
-        this.processQueue();
-      });
+    void this.fetchAndDownload(task);
   }
 
   /**
@@ -340,7 +345,6 @@ export class DownloadQueue {
       task.error = error;
     }
 
-    this.saveTask(task);
     this.callbacks.onTaskUpdated?.(task);
     this.callbacks.onQueueChanged?.();
   }
@@ -362,11 +366,6 @@ export class DownloadQueue {
     if (task.status === "pending") {
       task.status = "downloading";
       this.callbacks.onQueueChanged?.();
-    }
-
-    // 每 5% 或完成时持久化
-    if (normalizedProgress % 5 === 0 || normalizedProgress === 100) {
-      this.saveTask(task);
     }
 
     this.callbacks.onTaskUpdated?.(task);
@@ -410,7 +409,6 @@ export class DownloadQueue {
    * @returns {boolean} 是否删除成功
    */
   removeTask(id: string): boolean {
-    this.db.deleteTask(id);
     return this.queue.delete(id);
   }
 
@@ -423,7 +421,6 @@ export class DownloadQueue {
         this.queue.delete(id);
       }
     }
-    this.db.clearCompleted();
     this.callbacks.onQueueChanged?.();
   }
 
@@ -435,7 +432,6 @@ export class DownloadQueue {
     const task = this.queue.get(id);
     if (task && task.status === "downloading") {
       task.status = "paused";
-      this.saveTask(task);
       this.youtubeManager.cancelDownload(id);
       this.callbacks.onTaskUpdated?.(task);
     }
@@ -449,7 +445,22 @@ export class DownloadQueue {
     const task = this.queue.get(id);
     if (task && task.status === "paused") {
       task.status = "pending";
-      this.saveTask(task);
+      task.error = undefined;
+      this.callbacks.onTaskUpdated?.(task);
+      this.processQueue();
+    }
+  }
+
+  /**
+   * 重试失败的任务
+   * @param {string} id - 任务 ID
+   */
+  retryTask(id: string): void {
+    const task = this.queue.get(id);
+    if (task && task.status === "failed") {
+      task.status = "pending";
+      task.progress = 0;
+      task.error = undefined;
       this.callbacks.onTaskUpdated?.(task);
       this.processQueue();
     }
@@ -459,11 +470,87 @@ export class DownloadQueue {
    * 关闭队列，保存状态
    */
   shutdown(): void {
-    // 保存所有任务状态
-    for (const task of this.queue.values()) {
-      this.saveTask(task);
-    }
     this.db.close();
-    logger.info("Queue shutdown, state saved");
+    logger.info("Queue shutdown");
+  }
+
+  /**
+   * 获取播放列表已下载集合
+   * @param {string} playlistId - 播放列表 ID
+   * @returns {Set<string>} 视频 ID 集合
+   */
+  private getPlaylistDownloadedSet(playlistId: string): Set<string> {
+    const existing = this.downloadedByPlaylist.get(playlistId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = new Set<string>();
+    this.downloadedByPlaylist.set(playlistId, created);
+    return created;
+  }
+
+  /**
+   * 判断视频是否已在当前任务队列中
+   * @param {string} videoId - 视频 ID
+   * @returns {boolean} 是否已存在相关任务
+   */
+  private hasTaskForVideo(videoId: string): boolean {
+    for (const task of this.queue.values()) {
+      const idMatch = task.url.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+      if (idMatch?.[1] === videoId && task.status !== "failed") {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 构建本地已下载视频索引
+   */
+  private ensureLocalDownloadedIndex(): void {
+    if (this.localIndexBuilt) {
+      return;
+    }
+
+    const walk = (dir: string, inheritedVideoId?: string): void => {
+      let entries: { name: string; isDirectory(): boolean }[];
+      try {
+        entries = readdirSync(dir, {
+          withFileTypes: true,
+          encoding: "utf-8",
+        }) as { name: string; isDirectory(): boolean }[];
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const match = entry.name.match(/\(([a-zA-Z0-9_-]{11})\)\s*$/);
+          const currentVideoId = match?.[1] || inheritedVideoId;
+          walk(fullPath, currentVideoId);
+          continue;
+        }
+
+        if (!inheritedVideoId) {
+          continue;
+        }
+
+        const extension = extname(entry.name).toLowerCase();
+        if (!this.audioExtensions.has(extension)) {
+          continue;
+        }
+
+        this.localDownloadedIds.add(inheritedVideoId);
+      }
+    };
+
+    walk(this.downloadDir);
+    this.localIndexBuilt = true;
+    logger.info("Local downloaded index built", {
+      count: this.localDownloadedIds.size,
+    });
   }
 }

@@ -4,11 +4,12 @@ import { DownloadQueue } from "./services/DownloadQueue";
 import { EventEmitter } from "./services/EventEmitter";
 import { DatabaseService } from "./services/Database";
 import { Scheduler } from "./services/Scheduler";
+import { DownloadVerifier } from "./services/DownloadVerifier";
 import { createDownloadAPI } from "./api/download";
 import { createSubscriptionsAPI } from "./api/subscriptions";
 import { createSchedulerAPI } from "./api/scheduler";
 import { config } from "./config";
-import { resolve, dirname } from "path";
+import { resolve, dirname, join } from "path";
 
 const rootDir = resolve(dirname(import.meta.filename), "..", "..", "..");
 const DOWNLOAD_DIR = resolve(rootDir, config.downloadDir!);
@@ -17,6 +18,7 @@ const DB_PATH = resolve(rootDir, config.dbPath!);
 const db = new DatabaseService(DB_PATH);
 const queue = new DownloadQueue(DOWNLOAD_DIR, 1, db);
 const emitter = new EventEmitter();
+const verifier = new DownloadVerifier(DOWNLOAD_DIR);
 
 queue.setCallbacks({
   onTaskUpdated: (task) => {
@@ -48,7 +50,16 @@ queue.setCallbacks({
   },
 });
 
-queue.loadFromDatabase();
+try {
+  const archiveStats = await verifier.rebuildArchive(
+    join(DOWNLOAD_DIR, "history.txt"),
+  );
+  console.log(
+    `[🗂️] 启动重建归档完成: 扫描 ${archiveStats.total}, 保留 ${archiveStats.valid}, 删除损坏 ${archiveStats.removed}`,
+  );
+} catch (error) {
+  console.error("[❌] 启动重建归档失败:", error);
+}
 
 const scheduler = new Scheduler(db, queue);
 
@@ -113,6 +124,8 @@ app.listen(config.port, () => {
   console.log(`🚀 服务器启动成功!`);
   console.log(`📍 API: http://localhost:${config.port}`);
   console.log(`🔌 WebSocket: ws://localhost:${config.port}/ws`);
+
+  console.log("[🧠] 任务队列为内存会话模式，重启后自动清空");
 
   scheduler.start();
 });

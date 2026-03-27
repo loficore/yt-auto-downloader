@@ -38,6 +38,8 @@ export interface Config {
   downloadDelayMin: number;
   /** 最大随机延迟 (毫秒) */
   downloadDelayMax: number;
+  /** 自动清理已完成任务的天数 (0 表示不自动清理) */
+  autoClearDays: number;
 }
 
 function getEnv(key: string, defaultValue?: string): string | undefined {
@@ -65,6 +67,7 @@ export const config = {
   maxDownloadsPerMinute: Number.parseInt(getEnv('MAX_DOWNLOADS_PER_MINUTE') || '5', 10),
   downloadDelayMin: Number.parseInt(getEnv('DOWNLOAD_DELAY_MIN') || '1000', 10),
   downloadDelayMax: Number.parseInt(getEnv('DOWNLOAD_DELAY_MAX') || '5000', 10),
+  autoClearDays: Number.parseInt(getEnv('AUTO_CLEAR_DAYS') || '30', 10),
 };
 
 const cookieSource = config.ytDlpCookiesFile
@@ -85,4 +88,5 @@ console.log('[⚙️] 配置加载完成:', {
   maxDownloadsPerMinute: config.maxDownloadsPerMinute,
   downloadDelayMin: config.downloadDelayMin,
   downloadDelayMax: config.downloadDelayMax,
+  autoClearDays: config.autoClearDays,
 });

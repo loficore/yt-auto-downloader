@@ -1,33 +1,6 @@
 import { Database } from "bun:sqlite";
 import { resolve, dirname } from "path";
 import { mkdirSync } from "fs";
-import type { DownloadStatus } from "@yt-auto-downloader/shared";
-
-/** 下载任务记录接口 */
-export interface TaskRecord {
-  /** 任务ID */
-  id: string;
-  /** 下载链接 */
-  url: string;
-  /** 艺术家 */
-  artist: string | null;
-  /** 歌曲标题 */
-  title: string | null;
-  /** 专辑名称 */
-  album: string | null;
-  /** 下载状态 */
-  status: DownloadStatus;
-  /** 下载进度（0-100） */
-  progress: number;
-  /** 错误信息（如果有） */
-  error: string | null;
-  /** 创建时间（Unix 时间戳） */
-  created_at: number;
-  /** 更新时间（Unix 时间戳） */
-  updated_at: number;
-  /** 下载完成后的文件路径 */
-  file_path: string | null;
-}
 
 /** 订阅记录接口 */
 export interface SubscriptionRecord {
@@ -43,30 +16,12 @@ export interface SubscriptionRecord {
   limit_per_sync: number | null;
   /** 上次同步时间（Unix 时间戳） */
   last_synced_at: number | null;
+  /** 上次下载到的位置 */
+  last_position: number;
   /** 创建时间（Unix 时间戳） */
   created_at: number;
   /** 更新时间（Unix 时间戳） */
   updated_at: number;
-}
-
-/** 播放列表视频记录接口 */
-export interface VideoRecord {
-  /** 视频ID（YouTube Video ID） */
-  id: string;
-  /** 所属播放列表ID */
-  playlist_id: string;
-  /** 视频标题 */
-  title: string | null;
-  /** 艺术家/频道名 */
-  artist: string | null;
-  /** 视频时长（秒） */
-  duration: number | null;
-  /** 是否已下载 */
-  downloaded: boolean;
-  /** 下载时间（Unix 时间戳） */
-  downloaded_at: number | null;
-  /** 视频在播放列表中的位置 */
-  position: number;
 }
 
 /** 数据库服务类 */
@@ -91,36 +46,6 @@ export class DatabaseService {
 
   private init(): void {
     this.db.run(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        url TEXT NOT NULL,
-        artist TEXT,
-        title TEXT,
-        album TEXT,
-        status TEXT DEFAULT 'pending',
-        progress INTEGER DEFAULT 0,
-        error TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        file_path TEXT
-      )
-    `);
-
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS videos (
-        id TEXT NOT NULL,
-        playlist_id TEXT NOT NULL,
-        title TEXT,
-        artist TEXT,
-        duration INTEGER,
-        downloaded INTEGER DEFAULT 0,
-        downloaded_at INTEGER,
-        position INTEGER DEFAULT 0,
-        PRIMARY KEY (id, playlist_id)
-      )
-    `);
-
-    this.db.run(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -135,17 +60,10 @@ export class DatabaseService {
         enabled INTEGER DEFAULT 1,
         limit_per_sync INTEGER DEFAULT 10,
         last_synced_at INTEGER,
+        last_position INTEGER DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
-    `);
-
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_videos_playlist ON videos(playlist_id)
-    `);
-
-    this.db.run(`
-      CREATE INDEX IF NOT EXISTS idx_videos_downloaded ON videos(downloaded)
     `);
 
     try {
@@ -155,155 +73,6 @@ export class DatabaseService {
     }
 
     console.log("[💾] 数据库初始化完成:", this.dbPath);
-  }
-
-  /**
-   * 保存下载任务
-   * @param {TaskRecord} task 任务记录
-   */
-  saveTask(task: TaskRecord): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO tasks
-      (id, url, artist, title, album, status, progress, error, created_at, updated_at, file_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      task.id,
-      task.url,
-      task.artist,
-      task.title,
-      task.album,
-      task.status,
-      task.progress,
-      task.error,
-      task.created_at,
-      task.updated_at,
-      task.file_path,
-    );
-  }
-
-  /**
-   * 加载所有下载任务记录
-   * @returns {TaskRecord[]} 所有下载任务记录，按创建时间降序排列
-   */
-  loadTasks(): TaskRecord[] {
-    const stmt = this.db.prepare(
-      "SELECT * FROM tasks ORDER BY created_at DESC",
-    );
-    return stmt.all() as TaskRecord[];
-  }
-
-  /**
-   * 删除下载任务
-   * @param {string} id 任务ID
-   */
-  deleteTask(id: string): void {
-    const stmt = this.db.prepare("DELETE FROM tasks WHERE id = ?");
-    stmt.run(id);
-  }
-
-  /**
-   * 清除所有已完成的下载任务记录
-   */
-  clearCompleted(): void {
-    this.db.run("DELETE FROM tasks WHERE status = 'completed'");
-  }
-
-  /**
-   * 批量保存视频记录
-   * @param {VideoRecord[]} videos 视频记录数组
-   */
-  saveVideos(videos: VideoRecord[]): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO videos
-      (id, playlist_id, title, artist, duration, downloaded, downloaded_at, position)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const video of videos) {
-      stmt.run(
-        video.id,
-        video.playlist_id,
-        video.title,
-        video.artist,
-        video.duration,
-        video.downloaded ? 1 : 0,
-        video.downloaded_at,
-        video.position,
-      );
-    }
-  }
-
-  /**
-   * 获取播放列表中未下载的视频
-   * @param {string} playlistId 播放列表ID
-   * @param {number} limit 最大数量
-   * @returns {VideoRecord[]} 未下载的视频列表
-   */
-  getUndownloadedVideos(playlistId: string, limit: number): VideoRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM videos
-      WHERE playlist_id = ? AND downloaded = 0
-      ORDER BY position ASC
-      LIMIT ?
-    `);
-    const rows = stmt.all(playlistId, limit) as {
-      id: string;
-      playlist_id: string;
-      title: string | null;
-      artist: string | null;
-      duration: number | null;
-      downloaded: number;
-      downloaded_at: number | null;
-      position: number;
-    }[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      playlist_id: row.playlist_id,
-      title: row.title,
-      artist: row.artist,
-      duration: row.duration,
-      downloaded: row.downloaded === 1,
-      downloaded_at: row.downloaded_at,
-      position: row.position,
-    }));
-  }
-
-  /**
-   * 标记视频为已下载
-   * @param {string} videoId 视频ID
-   * @param {string} playlistId 播放列表ID
-   */
-  markVideoDownloaded(videoId: string, playlistId: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE videos
-      SET downloaded = 1, downloaded_at = ?
-      WHERE id = ? AND playlist_id = ?
-    `);
-    stmt.run(Date.now(), videoId, playlistId);
-  }
-
-  /**
-   * 获取播放列表中的视频数量统计
-   * @param {string} playlistId 播放列表ID
-   * @returns {{ total: number; downloaded: number }} 总数和已下载数
-   */
-  getPlaylistStats(playlistId: string): { total: number; downloaded: number } {
-    const totalStmt = this.db.prepare(
-      "SELECT COUNT(*) as count FROM videos WHERE playlist_id = ?",
-    );
-    const totalRow = totalStmt.get(playlistId) as { count: number };
-
-    const downloadedStmt = this.db.prepare(
-      "SELECT COUNT(*) as count FROM videos WHERE playlist_id = ? AND downloaded = 1",
-    );
-    const downloadedRow = downloadedStmt.get(playlistId) as { count: number };
-
-    return {
-      total: totalRow.count,
-      downloaded: downloadedRow.count,
-    };
   }
 
   /**
@@ -344,6 +113,7 @@ export class DatabaseService {
       enabled: number;
       limit_per_sync: number | null;
       last_synced_at: number | null;
+      last_position: number;
       created_at: number;
       updated_at: number;
     }[];
@@ -355,9 +125,44 @@ export class DatabaseService {
       enabled: row.enabled === 1,
       limit_per_sync: row.limit_per_sync,
       last_synced_at: row.last_synced_at,
+      last_position: row.last_position ?? 0,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
+  }
+
+  /**
+   * 获取单个订阅
+   * @param {string} id 订阅ID
+   * @returns {SubscriptionRecord | null} 订阅记录
+   */
+  getSubscription(id: string): SubscriptionRecord | null {
+    const stmt = this.db.prepare("SELECT * FROM subscriptions WHERE id = ?");
+    const row = stmt.get(id) as {
+      id: string;
+      url: string;
+      name: string;
+      enabled: number;
+      limit_per_sync: number | null;
+      last_synced_at: number | null;
+      last_position: number;
+      created_at: number;
+      updated_at: number;
+    } | undefined;
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      url: row.url,
+      name: row.name,
+      enabled: row.enabled === 1,
+      limit_per_sync: row.limit_per_sync,
+      last_synced_at: row.last_synced_at,
+      last_position: row.last_position ?? 0,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
   }
 
   /**
@@ -375,6 +180,7 @@ export class DatabaseService {
       enabled: number;
       limit_per_sync: number | null;
       last_synced_at: number | null;
+      last_position: number;
       created_at: number;
       updated_at: number;
     }[];
@@ -386,6 +192,7 @@ export class DatabaseService {
       enabled: row.enabled === 1,
       limit_per_sync: row.limit_per_sync,
       last_synced_at: row.last_synced_at,
+      last_position: row.last_position ?? 0,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
@@ -395,15 +202,15 @@ export class DatabaseService {
    * 添加订阅
    * @param {string} url 订阅 URL
    * @param {string} name 订阅名称
-   * @param {number} maxItems 最大下载数量
+   * @param {number | null} limitPerSync 每次同步最大下载数量，默认为 10
    * @returns {SubscriptionRecord} 新添加的订阅
    */
   addSubscription(url: string, name: string, limitPerSync: number | null = 10): SubscriptionRecord {
     const now = Date.now();
     const id = crypto.randomUUID();
     const stmt = this.db.prepare(`
-      INSERT INTO subscriptions (id, url, name, enabled, limit_per_sync, last_synced_at, created_at, updated_at)
-      VALUES (?, ?, ?, 1, ?, NULL, ?, ?)
+      INSERT INTO subscriptions (id, url, name, enabled, limit_per_sync, last_synced_at, last_position, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, NULL, 0, ?, ?)
     `);
     stmt.run(id, url, name, limitPerSync, now, now);
 
@@ -414,6 +221,7 @@ export class DatabaseService {
       enabled: true,
       limit_per_sync: limitPerSync,
       last_synced_at: null,
+      last_position: 0,
       created_at: now,
       updated_at: now,
     };
@@ -447,6 +255,10 @@ export class DatabaseService {
     if (updates.last_synced_at !== undefined) {
       fields.push("last_synced_at = ?");
       values.push(updates.last_synced_at);
+    }
+    if (updates.last_position !== undefined) {
+      fields.push("last_position = ?");
+      values.push(updates.last_position);
     }
 
     if (fields.length === 0) return false;

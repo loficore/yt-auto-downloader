@@ -19,6 +19,8 @@ const COOKIE_ERROR_KEYWORDS = [
 export interface DownloadTask {
   /** youtube链接 */
   url: string;
+  /** 视频标题（可选） */
+  title?: string;
   /** 艺术家名称（可选） */
   artist?: string;
 }
@@ -243,12 +245,77 @@ export class YoutubeManager {
   }
 
   /**
+   * 安全读取对象中的字符串字段
+   * @param {Record<string, unknown>} info - 元数据对象
+   * @param {string} key - 字段名
+   * @returns {string | undefined} 去除空白后的字符串
+   */
+  private getStringField(info: Record<string, unknown>, key: string): string | undefined {
+    const value = info[key];
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  /**
+   * 解析艺术家名称
+   * @param {Record<string, unknown>} info - yt-dlp info json
+   * @returns {string} 艺术家名称
+   */
+  private resolveArtist(info: Record<string, unknown>): string {
+    return (
+      this.getStringField(info, "artist") ||
+      this.getStringField(info, "album_artist") ||
+      this.getStringField(info, "uploader") ||
+      this.getStringField(info, "channel") ||
+      this.getStringField(info, "creator") ||
+      "Unknown"
+    );
+  }
+
+  /**
+   * 获取视频元数据
+   * @param {string} url - 视频 URL
+   * @returns {Promise<{title: string; artist: string} | null>} 视频信息
+   */
+  async getVideoInfo(url: string): Promise<{ title: string; artist: string } | null> {
+    try {
+      const cookieArgs = this.getCookieArgs();
+      const jsRuntimeArgs = this.getJsRuntimeArgs();
+      const result = await execa("yt-dlp", [
+        "--dump-json",
+        "--no-download",
+        ...jsRuntimeArgs,
+        ...cookieArgs,
+        url,
+      ]);
+      const parsed = JSON.parse(result.stdout) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        logger.warn("Invalid video info response", { url });
+        return null;
+      }
+      const info = parsed as Record<string, unknown>;
+      return {
+        title: this.getStringField(info, "title") || "未知标题",
+        artist: this.resolveArtist(info),
+      };
+    } catch (error) {
+      logger.error("Failed to get video info", { url, error: this.getErrorMessage(error) });
+      return null;
+    }
+  }
+
+  /**
    * 执行 yt-dlp 并监听实时进度
    * @param {string} taskId - 任务 ID
    * @param {string[]} args - 命令参数
+   * @returns {Promise<{ skippedByArchive: boolean }>} 执行结果，包含是否命中下载归档
    */
-  private async runYtDlp(taskId: string, args: string[]): Promise<void> {
+  private async runYtDlp(taskId: string, args: string[]): Promise<{ skippedByArchive: boolean }> {
     const subprocess = execa("yt-dlp", ["--newline", ...args]);
+    let skippedByArchive = false;
 
     const onChunk = (chunk: string | Buffer): void => {
       const text = chunk.toString();
@@ -256,6 +323,9 @@ export class YoutubeManager {
       for (const line of lines) {
         if (line.trim()) {
           logger.info(`[yt-dlp] ${line}`);
+          if (line.includes("has already been recorded in the archive")) {
+            skippedByArchive = true;
+          }
         }
         const progress = this.extractProgress(line);
         if (progress !== null) {
@@ -268,6 +338,7 @@ export class YoutubeManager {
     subprocess.stderr?.on("data", onChunk);
 
     await subprocess;
+    return { skippedByArchive };
   }
 
   /**
@@ -292,7 +363,8 @@ export class YoutubeManager {
       }
       
       // Opus format with lyrics support
-      // Output: Downloads/Artist/Title/Title.opus
+      // Output: Downloads/Artist/Title (VideoId)/Title.opus
+      // 包含视频ID可以避免不同视频但标题相同时的文件覆盖
       baseArgs.push(
         ...jsRuntimeArgs,
         "-f", "ba",
@@ -304,20 +376,52 @@ export class YoutubeManager {
         "--download-archive",
         path.join(this.downloadDir, "history.txt"),
         "-o",
-        `${this.downloadDir}/%(artist)s/%(title)s/%(title)s.%(ext)s`,
+        `${this.downloadDir}/%(artist)s/%(title)s (%(id)s)/%(title)s.%(ext)s`,
         task.url
       );
 
+      let runResult: { skippedByArchive: boolean };
       try {
-        await this.runYtDlp(taskId, [...cookieArgs, ...baseArgs]);
+        runResult = await this.runYtDlp(taskId, [...cookieArgs, ...baseArgs]);
       } catch (error) {
         const errorMsg = this.getErrorMessage(error);
         if (cookieArgs.length > 0 && this.isCookieError(errorMsg)) {
           logger.warn("Cookie read failed, retrying without cookies", { error: errorMsg });
-          await this.runYtDlp(taskId, baseArgs);
+          runResult = await this.runYtDlp(taskId, baseArgs);
         } else {
           throw error;
         }
+      }
+
+      if (runResult.skippedByArchive) {
+        logger.info("Download skipped by archive, running quick verification", {
+          url: task.url,
+          taskId,
+        });
+
+        const quickVerifyResult = await this.verifier.quickVerifyAndCleanup(
+          task.url,
+        );
+        if (!quickVerifyResult.valid) {
+          logger.error("Archive hit but quick verification failed", {
+            url: task.url,
+            taskId,
+            reason: quickVerifyResult.reason,
+          });
+          this.callbacks.onError?.(
+            taskId,
+            `Archive verification failed: ${quickVerifyResult.reason}`,
+          );
+          return;
+        }
+
+        logger.info("Archive hit and quick verification passed", {
+          url: task.url,
+          taskId,
+          fileSize: quickVerifyResult.fileSize,
+        });
+        this.callbacks.onSuccess?.(taskId);
+        return;
       }
 
       logger.info("Download completed, verifying...", { url: task.url, taskId });

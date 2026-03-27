@@ -140,6 +140,7 @@ export class Scheduler {
           const result = await this.queue.syncPlaylist(
             subscription.url,
             subscription.limit_per_sync ?? undefined,
+            subscription.id,
           );
 
           this.db.updateSubscription(subscription.id, {
