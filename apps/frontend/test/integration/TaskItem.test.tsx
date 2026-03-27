@@ -18,13 +18,14 @@ const createMockTask = (overrides: Partial<DownloadTask> = {}): DownloadTask => 
 });
 
 describe('TaskItem', () => {
-  it('renders task URL', () => {
-    const task = createMockTask({ url: 'https://youtube.com/watch?v=abc123' });
+  it('renders task title and artist', () => {
+    const task = createMockTask({ title: 'Test Video', artist: 'Test Artist' });
     const onRemove = vi.fn();
 
     render(<TaskItem task={task} onRemove={onRemove} />);
 
-    expect(screen.getAllByText(/youtube\.com/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Test Video')).toBeDefined();
+    expect(screen.getByText('Test Artist')).toBeDefined();
   });
 
   it('displays pending status correctly', () => {
@@ -87,5 +88,26 @@ describe('TaskItem', () => {
     render(<TaskItem task={task} onRemove={vi.fn()} />);
 
     expect(screen.getByText('75%')).toBeDefined();
+  });
+
+  it('shows retry button for failed tasks when onRetry is provided', () => {
+    const task = createMockTask({ status: 'failed', error: 'Download failed' });
+    const onRetry = vi.fn();
+
+    render(<TaskItem task={task} onRemove={vi.fn()} onRetry={onRetry} />);
+
+    expect(screen.getByRole('button', { name: /重试任务/i })).toBeDefined();
+  });
+
+  it('calls onRetry when retry button is clicked', () => {
+    const task = createMockTask({ id: 'task-to-retry', status: 'failed' });
+    const onRetry = vi.fn();
+
+    render(<TaskItem task={task} onRemove={vi.fn()} onRetry={onRetry} />);
+
+    const retryButton = screen.getByRole('button', { name: /重试任务/i });
+    fireEvent.click(retryButton);
+
+    expect(onRetry).toHaveBeenCalledWith('task-to-retry');
   });
 });

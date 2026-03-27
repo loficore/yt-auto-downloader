@@ -8,6 +8,8 @@ import {
   IconListCheck,
 } from "@tabler/icons-react";
 
+import {JSX} from "react";
+
 interface QueueStatsProps {
   stats: QueueInfo;
 }

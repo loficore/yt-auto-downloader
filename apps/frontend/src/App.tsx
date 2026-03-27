@@ -49,6 +49,7 @@ export function App() {
     queueInfo,
     removeTask,
     clearCompleted,
+    retryTask,
     syncPlaylist,
     refreshTasks,
     handleWebSocketMessage,
@@ -71,6 +72,13 @@ export function App() {
   const handleClearCompleted = useCallback(() => {
     void clearCompleted();
   }, [clearCompleted]);
+
+  const handleRetryTask = useCallback(
+    (id: string) => {
+      void retryTask(id);
+    },
+    [retryTask],
+  );
 
   const sidebarContent = useMemo(
     () => (
@@ -103,6 +111,7 @@ export function App() {
               tasks={tasks}
               onRemove={handleRemoveTask}
               onClearCompleted={handleClearCompleted}
+              onRetry={handleRetryTask}
             />
           </ErrorBoundary>
         </div>

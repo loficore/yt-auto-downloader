@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { DownloadTask } from "@yt-auto-downloader/shared";
 import { ActionIcon, Badge, Card, Group, Progress, Stack, Text } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { IconRefresh, IconTrash } from "@tabler/icons-react";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "⏳ 等待中",
@@ -22,36 +22,28 @@ const STATUS_COLORS: Record<string, string> = {
 interface TaskItemProps {
   task: DownloadTask;
   onRemove: (id: string) => void;
-}
-
-function getSafeHostname(urlValue: unknown): string {
-  try {
-    if (typeof urlValue !== "string" || !urlValue) {
-      return "未知来源";
-    }
-    return new URL(urlValue).hostname || "未知来源";
-  } catch {
-    if (typeof urlValue === "string") {
-      return urlValue.length > 30 ? `${urlValue.slice(0, 27)}...` : urlValue;
-    }
-    return "未知来源";
-  }
+  onRetry?: (id: string) => void;
 }
 
 export const TaskItem = memo(function TaskItem({
   task,
   onRemove,
+  onRetry,
 }: TaskItemProps) {
+  const displayTitle = task.title && task.title !== task.url ? task.title : "未知标题";
+  const displayArtist = task.artist?.trim() ? task.artist : "Unknown";
+
   return (
     <Card withBorder radius="md" padding="md">
       <Stack gap="sm">
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
             <Text fw={600} size="sm" truncate>
-              {getSafeHostname(task.url)}
+              {displayTitle}
             </Text>
-            <Text c="dimmed" size="xs" style={{ wordBreak: "break-all" }}>
-              {task.url}
+            <Text c="dimmed" size="xs">
+              {displayArtist}
+              {task.album ? ` • ${task.album}` : ""}
             </Text>
             <Group gap="xs">
               <Badge
@@ -67,14 +59,26 @@ export const TaskItem = memo(function TaskItem({
               ) : null}
             </Group>
           </Stack>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            onClick={() => onRemove(task.id)}
-            aria-label="删除任务"
-          >
-            <IconTrash size={16} />
-          </ActionIcon>
+          <Group gap="xs">
+            {task.status === "failed" && onRetry && (
+              <ActionIcon
+                variant="subtle"
+                color="blue"
+                onClick={() => onRetry(task.id)}
+                aria-label="重试任务"
+              >
+                <IconRefresh size={16} />
+              </ActionIcon>
+            )}
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              onClick={() => onRemove(task.id)}
+              aria-label="删除任务"
+            >
+              <IconTrash size={16} />
+            </ActionIcon>
+          </Group>
         </Group>
 
         {task.status === "downloading" ? (

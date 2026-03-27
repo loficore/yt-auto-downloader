@@ -135,7 +135,7 @@ export class Logger {
 
 export const logger = new Logger({
   level: (() => {
-    const env = import.meta.env.VITE_LOG_LEVEL?.toUpperCase();
+    const env = import.meta.env.VITE_LOG_LEVEL;
     if (env === "DEBUG") return LogLevel.DEBUG;
     if (env === "WARN") return LogLevel.WARN;
     if (env === "ERROR") return LogLevel.ERROR;

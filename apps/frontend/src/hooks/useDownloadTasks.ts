@@ -8,6 +8,7 @@ import {
   isRemoveTaskData,
   isQueueInfo,
   isRecord,
+  isRetryTaskData,
 } from "../utils/typeGuards";
 import { logger } from "../utils/logger";
 
@@ -38,6 +39,8 @@ export interface UseDownloadTasksReturn {
   removeTask: (id: string) => Promise<void>;
   /** 清除已完成的下载任务 */
   clearCompleted: () => Promise<void>;
+  /** 重试失败的任务 */
+  retryTask: (id: string) => Promise<void>;
   /** 同步播放列表 */
   syncPlaylist: (playlistUrl: string) => Promise<PlaylistSyncResult | null>;
   /** 刷新下载任务列表 */
@@ -159,6 +162,23 @@ export function useDownloadTasks(): UseDownloadTasksReturn {
     }
   }, []);
 
+  const retryTask = useCallback(async (id: string): Promise<void> => {
+    try {
+      const data = await requestApi(`/api/download/task/${id}/retry`, isRetryTaskData, {
+        method: "POST",
+      });
+      if (data.task) {
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === id ? { ...t, status: "pending", progress: 0, error: undefined } : t,
+          ),
+        );
+      }
+    } catch (err: unknown) {
+      logger.error("Failed to retry task", { error: err });
+    }
+  }, []);
+
   const syncPlaylist = useCallback(async (playlistUrl: string): Promise<PlaylistSyncResult | null> => {
     try {
       const data = await requestApi("/api/download/sync-playlist", isPlaylistSyncResult, {
@@ -181,6 +201,7 @@ export function useDownloadTasks(): UseDownloadTasksReturn {
     bulkImport,
     removeTask,
     clearCompleted,
+    retryTask,
     syncPlaylist,
     refreshTasks,
     handleWebSocketMessage,

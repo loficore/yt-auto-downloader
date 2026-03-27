@@ -2,6 +2,10 @@ import type { JSX } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { AppShell, Container, Group, Text } from "@mantine/core";
 
+/**
+ * 应用布局组件，包含头部导航、主内容区域和页脚
+ * @returns {JSX.Element} 渲染的应用布局组件
+ */
 export function AppLayout(): JSX.Element {
   return (
     <AppShell header={{ height: 72 }} footer={{ height: 54 }} padding="lg">

@@ -162,3 +162,20 @@ export interface RemoveTaskData {
 export function isRemoveTaskData(value: unknown): value is RemoveTaskData {
   return isRecord(value) && typeof value.removed === "boolean";
 }
+
+/**
+ * 重试任务响应类型
+ */
+export interface RetryTaskData {
+  /** 重试后的任务数据 */
+  task: DownloadTask | null;
+}
+
+/**
+ * 检查值是否为重试任务数据类型
+ * @param {unknown} value  要检查的值
+ * @returns {boolean}  如果值是重试任务数据类型，则返回 true；否则返回 false
+ */
+export function isRetryTaskData(value: unknown): value is RetryTaskData {
+  return isRecord(value) && (value.task === null || isDownloadTask(value.task));
+}
